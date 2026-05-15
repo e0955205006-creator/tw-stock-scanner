@@ -1,0 +1,36 @@
+name: Daily TW Stock Scan
+
+on:
+  schedule:
+    - cron: '0 9 * * *' # 台北時間每天 17:00 執行
+  workflow_dispatch: # 讓你可以手動點擊執行
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # 賦予讀寫權限，讓 Actions 可以把網頁檔推送到你的儲存庫
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Scan
+        run: python scan_tw_electronics.py
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add tw_electronics.html
+          git commit -m "Auto update scan results" || exit 0
+          git push
