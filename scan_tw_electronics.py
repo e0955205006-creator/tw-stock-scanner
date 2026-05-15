@@ -4,7 +4,6 @@ import datetime
 import requests
 import io
 
-# 1. 獲取台股電子類股清單
 def get_tw_electronics_list():
     try:
         url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
@@ -18,7 +17,6 @@ def get_tw_electronics_list():
         return elec_df[['Ticker', '產業別']].values.tolist()
     except: return [["2330.TW", "半導體業"]]
 
-# 2. 回測邏輯
 def backtest_strategy(df_history, ma_series):
     total_return, trades_count, success_trades = 0.0, 0, 0
     in_position = False
@@ -64,10 +62,9 @@ def find_best_ma(s_data):
         if ret > best_ret: best_ret, best_res = ret, (ma_len, ret, win, count, logs)
     return best_res
 
-# 3. 主程序
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股掃描...")
+    print("啟動台股掃描...")
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
     industry_map = {x[0]: x[1] for x in ticker_info}
@@ -75,7 +72,7 @@ def main():
     vol_data = yf.download(tickers, period="10d", group_by='ticker', progress=False)
     valid_tickers = [t for t in tickers if t in vol_data and vol_data[t]['Volume'].tail(5).mean() > 3000000]
 
-    print(f"符合門檻標的共 {len(valid_tickers)} 檔。開始生成結果...")
+    print(f"符合門檻標的共 {len(valid_tickers)} 檔。")
     full_data = yf.download(valid_tickers, period="3y", auto_adjust=True, group_by='ticker', progress=False)
     
     all_cards = []
@@ -88,50 +85,54 @@ def main():
             
             if abs(diff) <= 0.01:
                 pure_symbol = t.split('.')[0]
-                # 關鍵修正：將 symbol 設定為 TWSE:XXXX 並加入與美股一致的介面設定
                 log_rows = "".join([f"<tr class='{'table-success' if l['is_win'] else ''}'><td>{l['buy_date']}</td><td>{l['buy_p']}</td><td>{l['sell_date']}</td><td>{l['sell_p']}</td><td>{l['ret']}</td></tr>" for l in logs])
                 
+                # 核心修正：改用更基礎的嵌入格式，強制指定 TWSE 交易所
                 card_html = f'''
                 <div class="card mb-4 shadow">
                     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
                         <div><b>{t}</b> <small>({industry_map[t]})</small> <span class="badge bg-light text-dark ms-2">專屬 {best_ma}MA</span></div>
                         <div class="text-end">
-                            <small style="color:{'#90ee90' if ret > 0 else '#ffcccb'}; font-weight:bold;">3Y淨報酬: {ret:+.1f}%</small><br>
-                            <small style="opacity:0.8;">勝率: {win:.1f}% ({count}次交易)</small>
+                            <small style="color:#90ee90; font-weight:bold;">3Y淨報酬: {ret:+.1f}%</small><br>
+                            <small>勝率: {win:.1f}% ({count}次)</small>
                         </div>
                     </div>
                     <div class="card-body">
                         <p><b>{best_ma}MA 偏離:</b> {diff*100:.2f}% | <b>現價:</b> {curr_p:.2f}</p>
-                        <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#logs_{pure_symbol}">查看對帳單 ({count} 筆明細)</button>
+                        <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#logs_{pure_symbol}">對帳單 ({count}筆)</button>
                         <div class="collapse" id="logs_{pure_symbol}">
                             <div class="table-responsive mb-3" style="max-height: 250px;"><table class="table table-sm small text-center"><thead class="table-light"><tr><th>買入</th><th>價</th><th>賣出</th><th>價</th><th>損益</th></tr></thead><tbody>{log_rows}</tbody></table></div>
                         </div>
-                        <div id="tv_{pure_symbol}" style="height:400px;"></div>
-                        <script>
+                        <div class="tradingview-widget-container">
+                            <div id="tv_{pure_symbol}"></div>
+                            <script type="text/javascript">
                             new TradingView.widget({{
-                                "autosize": true,
-                                "symbol": "TWSE:{pure_symbol}",
-                                "interval": "D",
-                                "timezone": "Asia/Taipei",
-                                "theme": "light",
-                                "style": "1",
-                                "locale": "zh_TW",
-                                "toolbar_bg": "#f1f3f6",
-                                "enable_publishing": false,
-                                "hide_top_toolbar": true,
-                                "hide_side_toolbar": true,
-                                "container_id": "tv_{pure_symbol}",
-                                "studies": [{{ "id": "MASimple@tv-basicstudies", "inputs": {{ "length": {best_ma} }} }}],
-                                "overrides": {{ 
-                                    "mainSeriesProperties.candleStyle.upColor": "#f63538", 
-                                    "mainSeriesProperties.candleStyle.downColor": "#1aa308",
-                                    "mainSeriesProperties.candleStyle.borderUpColor": "#f63538", 
-                                    "mainSeriesProperties.candleStyle.borderDownColor": "#1aa308",
-                                    "mainSeriesProperties.candleStyle.wickUpColor": "#f63538", 
-                                    "mainSeriesProperties.candleStyle.wickDownColor": "#1aa308"
-                                }}
+                              "width": "100%",
+                              "height": 400,
+                              "symbol": "TWSE:{pure_symbol}",
+                              "interval": "D",
+                              "timezone": "Asia/Taipei",
+                              "theme": "light",
+                              "style": "1",
+                              "locale": "zh_TW",
+                              "toolbar_bg": "#f1f3f6",
+                              "enable_publishing": false,
+                              "hide_top_toolbar": true,
+                              "hide_legend": false,
+                              "save_image": false,
+                              "container_id": "tv_{pure_symbol}",
+                              "studies": [{{ "id": "MASimple@tv-basicstudies", "inputs": {{ "length": {best_ma} }} }}],
+                              "overrides": {{
+                                "mainSeriesProperties.candleStyle.upColor": "#f63538",
+                                "mainSeriesProperties.candleStyle.downColor": "#1aa308",
+                                "mainSeriesProperties.candleStyle.borderUpColor": "#f63538",
+                                "mainSeriesProperties.candleStyle.borderDownColor": "#1aa308",
+                                "mainSeriesProperties.candleStyle.wickUpColor": "#f63538",
+                                "mainSeriesProperties.candleStyle.wickDownColor": "#1aa308"
+                              }}
                             }});
-                        </script>
+                            </script>
+                        </div>
                     </div>
                 </div>'''
                 all_cards.append({'ret': ret, 'html': card_html})
@@ -140,8 +141,8 @@ def main():
     all_cards.sort(key=lambda x: x['ret'], reverse=True)
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(f'''
-<!DOCTYPE html><html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet"><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script><script src="https://s3.tradingview.com/tv.js"></script><title>台股電子股掃描</title></head>
-<body class="bg-light py-5"><div class="container" style="max-width:850px;"><h2 class="text-center mb-4">🇹🇼 台股電子股全自動掃描儀</h2><p class="text-center text-muted mb-4">條件：日均量 > 3000張 | MA 正負 1% 範圍 | 更新時間：{today_dt.strftime('%Y-%m-%d %H:%M')}</p>
+<!DOCTYPE html><html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet"><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><title>台股掃描儀</title></head>
+<body class="bg-light py-5"><div class="container" style="max-width:850px;"><h2 class="text-center mb-4">🇹🇼 台股電子股全自動掃描儀</h2><p class="text-center text-muted">條件：日均量 > 3000張 | MA 正負 1%</p>
 {"".join([c['html'] for c in all_cards])}</div></body></html>''')
     print("完成！已產出 index.html。")
 
