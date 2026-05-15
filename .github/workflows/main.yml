@@ -2,15 +2,16 @@ name: Daily TW Stock Scan
 
 on:
   schedule:
-    - cron: '0 9 * * *' # 台北時間每天 17:00 執行
-  workflow_dispatch: # 讓你可以手動點擊執行
+    - cron: '0 9 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 賦予讀寫權限，讓 Actions 可以把網頁檔推送到你的儲存庫
+    # 重點：在這裡明確加入寫入權限
     permissions:
       contents: write
+      
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -29,8 +30,8 @@ jobs:
 
       - name: Commit and Push
         run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
-          git add tw_electronics.html
-          git commit -m "Auto update scan results" || exit 0
-          git push
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          # 如果沒有檔案變動就不 commit，避免報錯
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto update scan results" && git push)
