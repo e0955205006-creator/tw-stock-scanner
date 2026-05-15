@@ -171,16 +171,16 @@ def main():
         except: continue
 
     # 排序：淨報酬率高到低
-    all_cards.sort(key=lambda x: x['ret'], reverse=True)
+        all_cards.sort(key=lambda x: x['ret'], reverse=True)
     
     # 產出 index.html
     with open("index.html", "w", encoding="utf-8") as f:
         cards_joined = "".join([c['html'] for c in all_cards])
         f.write(f'''
 <!DOCTYPE html><html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet"><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script><script src="https://s3.tradingview.com/tv.js"></script><title>台股掃描儀</title></head>
-<body class="bg-light py-5"><div class="container" style="max-width:850px;"><h2 class="text-center mb-4">🇹🇼 台股電子股全自動掃描儀</h2><p class="text-center text-muted mb-4">日均量 > 3000張 | MA 正負 1% | 更新：{today_dt.strftime('%Y-%m-%d %H:%M')}</p>
+<body class="bg-light py-5"><div class="container" style="max-width:850px;"><h2 class="text-center mb-4">🇹🇼 台股電子股全自動掃描儀</h2>
 {cards_joined}</div></body></html>''')
-    print("完成！已更新 index.html。")
+        print("完成！已更新 index.html。") # 這行也要縮排進去
 
 if __name__ == "__main__":
     main()
