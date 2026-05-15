@@ -4,28 +4,40 @@ import datetime
 import requests
 import io
 
-# 1. 抓取上市電子類股清單
+# ==========================================
+# 1. 自動獲取台股上市電子股清單
+# ==========================================
 def get_tw_electronics_list():
+    """從證交所爬取所有上市電子類股代碼"""
     try:
         url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
         res = requests.get(url)
         df = pd.read_html(res.text)[0]
         df.columns = df.iloc[0]
         df = df.iloc[1:]
-        elec_categories = ['半導體業', '電腦及週邊設備業', '光電業', '通信網路業', '電子零組件業', '電子通路業', '資訊服務業', '其他電子業']
+        
+        # 篩選電子相關產業
+        elec_categories = ['半導體業', '電腦及週邊設備業', '光電業', '通信網路業', 
+                           '電子零組件業', '電子通路業', '資訊服務業', '其他電子業']
         elec_df = df[df['產業別'].isin(elec_categories)].copy()
+        
+        # 提取代號 (例如 "2330 台積電" -> "2330.TW")
         elec_df['Ticker'] = elec_df['有價證券代號及名稱'].str.split('　').str[0] + ".TW"
         return elec_df[['Ticker', '產業別']].values.tolist()
-    except: return [["2330.TW", "半導體業"]]
+    except Exception as e:
+        print(f"獲取清單失敗: {e}")
+        return [["2330.TW", "半導體業"]]
 
-# 2. 動態次數回測邏輯
+# ==========================================
+# 2. 核心回測邏輯 (含台股稅費)
+# ==========================================
 def backtest_strategy(df_history, ma_series):
     total_return, trades_count, success_trades = 0.0, 0, 0
     in_position = False
     buy_price_raw, buy_date, buy_day_index = 0.0, None, -1
     trade_logs = []
     
-    # 台股費率設定
+    # 台股費率設定 (買 0.1425%, 賣 0.4425%)
     fee_buy, fee_sell = 0.001425, (0.001425 + 0.003)
     
     start_idx = ma_series.first_valid_index()
@@ -77,7 +89,9 @@ def find_best_ma(s_data):
             best_ret, best_res = ret, (ma_len, ret, win, count, logs)
     return best_res
 
-# 3. 主程序
+# ==========================================
+# 3. 主掃描程序
+# ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
     print(f"啟動台股電子股掃描...")
@@ -86,24 +100,25 @@ def main():
     tickers = [x[0] for x in ticker_info]
     industry_map = {x[0]: x[1] for x in ticker_info}
 
-    # 門檻：日均量 3000 張
+    # 第一階段：成交量過濾 (日均量 > 3000張)
     vol_data = yf.download(tickers, period="10d", group_by='ticker', progress=False)
     valid_tickers = [t for t in tickers if t in vol_data and vol_data[t]['Volume'].tail(5).mean() > 3000000]
 
-    print(f"符合門檻標的共 {len(valid_tickers)} 檔。開始回測與產出網頁...")
+    print(f"符合門檻標的共 {len(valid_tickers)} 檔。開始回測並生成 index.html...")
     full_data = yf.download(valid_tickers, period="3y", auto_adjust=True, group_by='ticker', progress=False)
     
     all_cards = []
     for t in valid_tickers:
         try:
             s_data = full_data[t].dropna()
+            if len(s_data) < 200: continue
+            
             best_ma, ret, win, count, logs = find_best_ma(s_data)
-            curr_p = s_data['Close'].iloc[-1]
-            ma_val = s_data['Close'].rolling(best_ma).mean().iloc[-1]
+            curr_p, ma_val = s_data['Close'].iloc[-1], s_data['Close'].rolling(best_ma).mean().iloc[-1]
             diff = (curr_p / ma_val) - 1
             
             if abs(diff) <= 0.01:
-                # 這裡的 logs 長度是動態的
+                pure_symbol = t.split('.')[0]
                 log_rows = "".join([f"<tr class='{'table-success' if l['is_win'] else ''}'><td>{l['buy_date']}</td><td>{l['buy_p']}</td><td>{l['sell_date']}</td><td>{l['sell_p']}</td><td>{l['ret']}</td></tr>" for l in logs])
                 
                 card_html = f'''
@@ -117,17 +132,21 @@ def main():
                     </div>
                     <div class="card-body">
                         <p><b>{best_ma}MA 偏離:</b> {diff*100:.2f}% | <b>現價:</b> {curr_p:.2f}</p>
-                        <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#logs_{t.split('.')[0]}">查看該策略 {count} 筆交易明細</button>
-                        <div class="collapse" id="logs_{t.split('.')[0]}">
-                            <div class="table-responsive mb-3" style="max-height: 250px;"><table class="table table-sm small text-center"><thead class="table-light"><tr><th>買入日期</th><th>買入價</th><th>賣出日期</th><th>賣出價</th><th>損益</th></tr></thead><tbody>{log_rows}</tbody></table></div>
+                        <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#logs_{pure_symbol}">查看對帳單 ({count} 筆明細)</button>
+                        <div class="collapse" id="logs_{pure_symbol}">
+                            <div class="table-responsive mb-3" style="max-height: 250px;"><table class="table table-sm small text-center"><thead class="table-light"><tr><th>買入</th><th>價</th><th>賣出</th><th>價</th><th>損益</th></tr></thead><tbody>{log_rows}</tbody></table></div>
                         </div>
-                        <div id="tv_{t.split('.')[0]}" style="height:400px;"></div>
+                        <div id="tv_{pure_symbol}" style="height:400px;"></div>
                         <script>
                             new TradingView.widget({{
-                                "autosize": true, "symbol": "TWSE:{t.split('.')[0]}", "interval": "D", "theme": "light", "locale": "zh_TW",
-                                "container_id": "tv_{t.split('.')[0]}", "hide_top_toolbar": true, "hide_side_toolbar": true,
+                                "autosize": true, "symbol": "TWSE:{pure_symbol}", "interval": "D", "theme": "light", "style": "1", "locale": "zh_TW",
+                                "container_id": "tv_{pure_symbol}", "hide_top_toolbar": true, "hide_side_toolbar": true, "allow_symbol_change": true,
                                 "studies": [{{ "id": "MASimple@tv-basicstudies", "inputs": {{ "length": {best_ma} }} }}],
-                                "overrides": {{ "mainSeriesProperties.candleStyle.upColor": "#f63538", "mainSeriesProperties.candleStyle.downColor": "#1aa308", "mainSeriesProperties.candleStyle.borderUpColor": "#f63538", "mainSeriesProperties.candleStyle.borderDownColor": "#1aa308", "mainSeriesProperties.candleStyle.wickUpColor": "#f63538", "mainSeriesProperties.candleStyle.wickDownColor": "#1aa308" }}
+                                "overrides": {{ 
+                                    "mainSeriesProperties.candleStyle.upColor": "#f63538", "mainSeriesProperties.candleStyle.downColor": "#1aa308",
+                                    "mainSeriesProperties.candleStyle.borderUpColor": "#f63538", "mainSeriesProperties.candleStyle.borderDownColor": "#1aa308",
+                                    "mainSeriesProperties.candleStyle.wickUpColor": "#f63538", "mainSeriesProperties.candleStyle.wickDownColor": "#1aa308"
+                                }}
                             }});
                         </script>
                     </div>
@@ -137,11 +156,12 @@ def main():
 
     all_cards.sort(key=lambda x: x['ret'], reverse=True)
     
-    with open("tw_electronics.html", "w", encoding="utf-8") as f:
+    with open("index.html", "w", encoding="utf-8") as f:
         f.write(f'''
-<!DOCTYPE html><html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet"><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script><script src="https://s3.tradingview.com/tv.js"></script><title>台股掃描</title></head>
-<body class="bg-light py-5"><div class="container" style="max-width:850px;"><h2 class="text-center mb-4">🇹🇼 台股電子股全自動掃描儀</h2>{"".join([c['html'] for c in all_cards])}</div></body></html>''')
-    print(f"完成！共發現 {len(all_cards)} 檔標的。")
+<!DOCTYPE html><html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet"><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script><script src="https://s3.tradingview.com/tv.js"></script><title>台股電子股掃描</title></head>
+<body class="bg-light py-5"><div class="container" style="max-width:850px;"><h2 class="text-center mb-4">🇹🇼 台股電子股自動掃描儀</h2><p class="text-center text-muted mb-4">篩選：日均量 > 3000張 | MA正負1%範圍內</p>
+{"".join([c['html'] for c in all_cards])}</div></body></html>''')
+    print(f"成功！已產出 index.html。")
 
 if __name__ == "__main__":
     main()
