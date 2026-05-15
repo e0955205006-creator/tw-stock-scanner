@@ -19,12 +19,13 @@ def get_tw_electronics_list():
     except:
         return [["2330.TW", "半導體業"]]
 
-# 2. 策略回測邏輯
+# 2. 策略回測邏輯 (含台股稅費)
 def backtest_strategy(df_history, ma_series):
     total_return, trades_count, success_trades = 0.0, 0, 0
     in_position = False
     buy_price_raw, buy_date, buy_day_index = 0.0, None, -1
     trade_logs = []
+    # 買進 0.1425%, 賣出 0.4425% (含證交稅)
     fee_buy, fee_sell = 0.001425, (0.001425 + 0.003)
     start_idx = ma_series.first_valid_index()
     if start_idx is None: return -999, 0, 0, []
@@ -69,21 +70,24 @@ def find_best_ma(s_data):
 # 3. 主執行程序
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股全掃描...")
+    print("啟動台股電子股掃描儀...")
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
     industry_map = {x[0]: x[1] for x in ticker_info}
 
+    # 1. 成交量過濾 (日均量 > 3000張)
     vol_data = yf.download(tickers, period="10d", group_by='ticker', progress=False)
     valid_tickers = [t for t in tickers if t in vol_data and vol_data[t]['Volume'].tail(5).mean() > 3000000]
 
-    print(f"篩選出 {len(valid_tickers)} 檔標的。執行回測中...")
+    print(f"篩選出 {len(valid_tickers)} 檔符合門檻標的。執行回測並產出 index.html...")
     full_data = yf.download(valid_tickers, period="3y", auto_adjust=True, group_by='ticker', progress=False)
     
     all_cards = []
     for t in valid_tickers:
         try:
             s_data = full_data[t].dropna()
+            if len(s_data) < 200: continue
+            
             best_ma, ret, win, count, logs = find_best_ma(s_data)
             curr_p, ma_val = s_data['Close'].iloc[-1], s_data['Close'].rolling(best_ma).mean().iloc[-1]
             diff = (curr_p / ma_val) - 1
@@ -110,10 +114,22 @@ def main():
                         <div id="tv_{pure_symbol}" style="height:400px;"></div>
                         <script>
                             new TradingView.widget({{
-                              "width": "100%", "height": 400, "symbol": "TWSE:{pure_symbol}.TW", "interval": "D",
-                              "timezone": "Asia/Taipei", "theme": "light", "style": "1", "locale": "zh_TW",
-                              "toolbar_bg": "#f1f3f6", "enable_publishing": false, "hide_top_toolbar": true,
+                              "width": "100%",
+                              "height": 400,
+                              "symbol": "TWSE:{pure_symbol}.TW",
+                              "interval": "D",
+                              "timezone": "Asia/Taipei",
+                              "theme": "light",
+                              "style": "1",
+                              "locale": "zh_TW",
+                              "toolbar_bg": "#f1f3f6",
+                              "enable_publishing": false,
+                              "hide_top_toolbar": true,
+                              "hide_legend": false,
+                              "save_image": false,
                               "container_id": "tv_{pure_symbol}",
+                              "exchange": "TWSE",
+                              "data_status": "streaming",
                               "studies": [{{ "id": "MASimple@tv-basicstudies", "inputs": {{ "length": {best_ma} }} }}],
                               "overrides": {{ 
                                 "mainSeriesProperties.candleStyle.upColor": "#f63538", "mainSeriesProperties.candleStyle.downColor": "#1aa308",
@@ -129,7 +145,6 @@ def main():
 
     all_cards.sort(key=lambda x: x['ret'], reverse=True)
     
-    # --- 關鍵寫入邏輯 ---
     with open("index.html", "w", encoding="utf-8") as f:
         html_content = "".join([c['html'] for c in all_cards])
         f.write(f'''<!DOCTYPE html><html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet"><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><title>台股掃描儀</title></head><body class="bg-light py-5"><div class="container" style="max-width:850px;"><h2 class="text-center mb-4">🇹🇼 台股電子股全自動掃描儀</h2>{html_content}</div></body></html>''')
