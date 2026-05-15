@@ -110,7 +110,7 @@ def main():
                         <div id="tv_{pure_symbol}" style="height:400px;"></div>
                         <script>
                             new TradingView.widget({{
-                              "width": "100%", "height": 400, "symbol": "TWSE:{pure_symbol}", "interval": "D",
+                              "width": "100%", "height": 400, "symbol": "TWSE:{pure_symbol}.TW", "interval": "D",
                               "timezone": "Asia/Taipei", "theme": "light", "style": "1", "locale": "zh_TW",
                               "toolbar_bg": "#f1f3f6", "enable_publishing": false, "hide_top_toolbar": true,
                               "container_id": "tv_{pure_symbol}",
