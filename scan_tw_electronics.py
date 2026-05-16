@@ -18,14 +18,14 @@ def get_tw_electronics_list():
 
         elec_categories = [
             '半導體業', '電腦及週邊設備業', '光電業', '通信網路業',
-            '電子零組件業', '電子通路業', '資訊服務業', '其他電子业'
+            '電子零組件業', '電子通路業', '資訊服務業', '其他電子業'
         ]
 
         elec_df = df[df['產業別'].isin(elec_categories)].copy()
         elec_df['Code'] = elec_df['有價證券代號及名稱'].str.split('　').str[0]
         elec_df['Ticker'] = elec_df['Code'] + ".TW"
         
-        # 修正：配合您測試成功的格式，全面改為 TAIEX-代號 (例如 TAIEX-2308)
+        # 鎖定您測試成功的連字號格式 TAIEX-XXXX
         elec_df['TVSymbol'] = "TAIEX-" + elec_df['Code']
 
         return elec_df[['Ticker', '產業別', 'TVSymbol']].values.tolist()
@@ -126,7 +126,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股掃描儀 (TAIEX-連字號最佳化版)...")
+    print("啟動台股電子股全自動安全掃描儀...")
 
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
@@ -292,7 +292,18 @@ def main():
             continue
 
     all_cards.sort(key=lambda x: x['ret'], reverse=True)
-    html_cards = "".join([c['html'] for c in all_cards])
+    
+    # 判斷是否有符合篩選門檻的股票，如果沒有則產生提示看板
+    if len(all_cards) > 0:
+        html_cards = "".join([c['html'] for c in all_cards])
+    else:
+        html_cards = """
+        <div class="alert alert-info text-center shadow-sm py-5" role="alert">
+            <h4 class="alert-heading mb-3">🔍 今日掃描完成</h4>
+            <p class="mb-0 text-muted">目前沒有任何台股電子股的股價偏離在指定 MA 均線的 <b>±1%</b> 範圍之內。</p>
+            <p class="small text-muted mt-2">請靜待下一個交易日收盤後的自動掃描更新。</p>
+        </div>
+        """
 
     base_template = """<!DOCTYPE html>
 <html lang="zh-TW">
