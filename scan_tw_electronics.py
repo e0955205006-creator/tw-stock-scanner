@@ -4,7 +4,7 @@ import datetime
 import requests
 import io
 
-# 1. 獲取台股電子類股清單
+# 1. 自動獲取台股上市電子股清單
 def get_tw_electronics_list():
     try:
         url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
@@ -12,20 +12,20 @@ def get_tw_electronics_list():
         df = pd.read_html(res.text)[0]
         df.columns = df.iloc[0]
         df = df.iloc[1:]
-        elec_categories = ['半導體業', '電腦及週邊設備業', '光電業', '通信網路業', '電子零組件業', '電子通路業', '資訊服務業', '其他電子業']
+        elec_categories = ['半導體業', '電腦及週邊設備業', '光電業', '通信網路業', 
+                           '電子零組件業', '電子通路業', '資訊服務業', '其他電子業']
         elec_df = df[df['產業別'].isin(elec_categories)].copy()
         elec_df['Ticker'] = elec_df['有價證券代號及名稱'].str.split('　').str[0] + ".TW"
         return elec_df[['Ticker', '產業別']].values.tolist()
     except:
         return [["2330.TW", "半導體業"]]
 
-# 2. 策略回測邏輯 (含台股稅費)
+# 2. 核心回測邏輯 (含台股稅費)
 def backtest_strategy(df_history, ma_series):
     total_return, trades_count, success_trades = 0.0, 0, 0
     in_position = False
     buy_price_raw, buy_date, buy_day_index = 0.0, None, -1
     trade_logs = []
-    # 買進 0.1425%, 賣出 0.4425% (含證交稅)
     fee_buy, fee_sell = 0.001425, (0.001425 + 0.003)
     start_idx = ma_series.first_valid_index()
     if start_idx is None: return -999, 0, 0, []
@@ -70,16 +70,16 @@ def find_best_ma(s_data):
 # 3. 主執行程序
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股掃描儀...")
+    print("啟動台股掃描程序...")
+    
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
     industry_map = {x[0]: x[1] for x in ticker_info}
 
-    # 1. 成交量過濾 (日均量 > 3000張)
     vol_data = yf.download(tickers, period="10d", group_by='ticker', progress=False)
     valid_tickers = [t for t in tickers if t in vol_data and vol_data[t]['Volume'].tail(5).mean() > 3000000]
 
-    print(f"篩選出 {len(valid_tickers)} 檔符合門檻標的。執行回測並產出 index.html...")
+    print(f"篩選出 {len(valid_tickers)} 檔標的。執行回測並產出 index.html...")
     full_data = yf.download(valid_tickers, period="3y", auto_adjust=True, group_by='ticker', progress=False)
     
     all_cards = []
@@ -126,15 +126,17 @@ def main():
                               "enable_publishing": false,
                               "hide_top_toolbar": true,
                               "hide_legend": false,
-                              "save_image": false,
                               "container_id": "tv_{pure_symbol}",
                               "exchange": "TWSE",
                               "data_status": "streaming",
                               "studies": [{{ "id": "MASimple@tv-basicstudies", "inputs": {{ "length": {best_ma} }} }}],
                               "overrides": {{ 
-                                "mainSeriesProperties.candleStyle.upColor": "#f63538", "mainSeriesProperties.candleStyle.downColor": "#1aa308",
-                                "mainSeriesProperties.candleStyle.borderUpColor": "#f63538", "mainSeriesProperties.candleStyle.borderDownColor": "#1aa308",
-                                "mainSeriesProperties.candleStyle.wickUpColor": "#f63538", "mainSeriesProperties.candleStyle.wickDownColor": "#1aa308"
+                                "mainSeriesProperties.candleStyle.upColor": "#f63538", 
+                                "mainSeriesProperties.candleStyle.downColor": "#1aa308",
+                                "mainSeriesProperties.candleStyle.borderUpColor": "#f63538", 
+                                "mainSeriesProperties.candleStyle.borderDownColor": "#1aa308",
+                                "mainSeriesProperties.candleStyle.wickUpColor": "#f63538", 
+                                "mainSeriesProperties.candleStyle.wickDownColor": "#1aa308"
                               }}
                             }});
                         </script>
@@ -145,10 +147,27 @@ def main():
 
     all_cards.sort(key=lambda x: x['ret'], reverse=True)
     
+    # 產出 index.html (注意 head 中的 tv.js)
     with open("index.html", "w", encoding="utf-8") as f:
-        html_content = "".join([c['html'] for c in all_cards])
-        f.write(f'''<!DOCTYPE html><html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet"><script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script><script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script><title>台股掃描儀</title></head><body class="bg-light py-5"><div class="container" style="max-width:850px;"><h2 class="text-center mb-4">🇹🇼 台股電子股全自動掃描儀</h2>{html_content}</div></body></html>''')
-    print("完成！已產出 index.html。")
+        html_cards = "".join([c['html'] for c in all_cards])
+        f.write(f'''<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+    <title>台股掃描儀</title>
+</head>
+<body class="bg-light py-5">
+    <div class="container" style="max-width:850px;">
+        <h2 class="text-center mb-4">🇹🇼 台股電子股全自動掃描儀</h2>
+        {html_cards}
+    </div>
+</body>
+</html>''')
+    print("完成！已更新 index.html。")
 
 if __name__ == "__main__":
     main()
