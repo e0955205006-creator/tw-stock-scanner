@@ -123,7 +123,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股掃描儀 (Lightweight Charts 版)...")
+    print("啟動台股電子股掃描儀 (Lightweight Charts 寬度修補版)...")
 
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
@@ -173,7 +173,6 @@ def main():
             best_ma, ret, win, count, logs = find_best_ma(s_data)
             curr_p = s_data['Close'].iloc[-1]
             
-            # 計算最佳 MA 序列
             ma_series = s_data['Close'].rolling(best_ma).mean()
             ma_val = ma_series.iloc[-1]
             diff = (curr_p / ma_val) - 1
@@ -181,9 +180,9 @@ def main():
             if abs(diff) <= 0.01:
                 pure_symbol = t.split('.')[0]
 
-                # 準備要餵給 Lightweight Charts 的資料 (過去120天，避免資料量過大卡頓)
-                chart_subset = s_data.tail(120)
-                ma_subset = ma_series.tail(120)
+                # 擷取近150天的數據餵給前台繪圖
+                chart_subset = s_data.tail(150)
+                ma_subset = ma_series.tail(150)
                 
                 ohlc_list = []
                 ma_list = []
@@ -191,18 +190,17 @@ def main():
                     time_str = idx.strftime('%Y-%m-%d')
                     ohlc_list.append({
                         "time": time_str,
-                        "open": float(row['Open']),
-                        "high": float(row['High']),
-                        "low": float(row['Low']),
-                        "close": float(row['Close'])
+                        "open": round(float(row['Open']), 2),
+                        "high": round(float(row['High']), 2),
+                        "low": round(float(row['Low']), 2),
+                        "close": round(float(row['Close']), 2)
                     })
                     if not pd.isna(ma_subset.loc[idx]):
                         ma_list.append({
                             "time": time_str,
-                            "value": float(ma_subset.loc[idx])
+                            "value": round(float(ma_subset.loc[idx]), 2)
                         })
 
-                # 將資料序列化為 JSON 字串
                 ohlc_json = json.dumps(ohlc_list)
                 ma_json = json.dumps(ma_list)
 
@@ -272,14 +270,16 @@ def main():
                             </div>
                         </div>
 
-                        <button
-                            class="btn btn-sm btn-success mb-3"
-                            onclick="loadChart_{pure_symbol}()"
-                        >
-                            載入圖表
-                        </button>
+                        <div>
+                            <button
+                                class="btn btn-sm btn-success mb-3"
+                                onclick="loadChart_{pure_symbol}()"
+                            >
+                                載入圖表
+                            </button>
+                        </div>
 
-                        <div id="chart_{pure_symbol}" style="height:400px; width:100%; border:1px solid #eee; background-color: #fff;"></div>
+                        <div id="chart_{pure_symbol}" style="height:400px; width:100%; border:1px solid #eee; background-color: #ffffff; position: relative;"></div>
 
                         <script>
                         let loaded_{pure_symbol} = false;
@@ -288,17 +288,20 @@ def main():
                             loaded_{pure_symbol} = true;
 
                             const chartContainer = document.getElementById('chart_{pure_symbol}');
+                            
+                            // 關鍵修正：確保寬度不為 0，如果還沒完全展開則預設採用滿版估計寬度
+                            const targetWidth = chartContainer.clientWidth || chartContainer.parentElement.clientWidth || 800;
+
                             const chart = LightweightCharts.createChart(chartContainer, {{
-                                width: chartContainer.clientWidth,
+                                width: targetWidth,
                                 height: 400,
-                                layout: {{ backgroundColor: '#ffffff', textColor: '#333' }},
-                                grid: {{ vertLines: {{ color: '#f0f0f0' }}, horzLines: {{ color: '#f0f0f0' }} }},
+                                layout: {{ backgroundColor: '#ffffff', textColor: '#333333' }},
+                                grid: {{ vertLines: {{ color: '#f5f5f5' }}, horzLines: {{ color: '#f5f5f5' }} }},
                                 crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }},
-                                priceScale: {{ borderColor: '#cccccc' }},
-                                timeScale: {{ borderColor: '#cccccc' }},
+                                priceScale: {{ borderColor: '#dddddd' }},
+                                timeScale: {{ borderColor: '#dddddd', timeVisible: true, secondsVisible: false }},
                             }});
 
-                            // 建立 K 線序列 (設定台股紅漲綠跌習慣)
                             const candlestickSeries = chart.addCandlestickSeries({{
                                 upColor: '#f63538',
                                 downColor: '#1aa308',
@@ -308,11 +311,9 @@ def main():
                                 wickDownColor: '#1aa308',
                             }});
 
-                            // 餵入 Python 準備好的純原生 K 線資料
                             const rawData = {ohlc_json};
                             candlestickSeries.setData(rawData);
 
-                            // 建立並繪製 Python 幫忙寻优出来的最佳 MA 均線
                             const maSeries = chart.addLineSeries({{
                                 color: '#2196F3',
                                 lineWidth: 2,
@@ -321,7 +322,11 @@ def main():
                             const maData = {ma_json};
                             maSeries.setData(maData);
 
-                            // 響應式視窗縮放
+                            // 延遲 50 毫秒強制再次刷新尺寸補丁，對齊彈性排版
+                            setTimeout(() => {{
+                                chart.resize(chartContainer.clientWidth || chartContainer.parentElement.clientWidth, 400);
+                            }}, 50);
+
                             window.addEventListener('resize', () => {{
                                 chart.resize(chartContainer.clientWidth, 400);
                             }});
