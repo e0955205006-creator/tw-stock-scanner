@@ -24,13 +24,13 @@ def get_tw_electronics_list():
         elec_df['Code'] = elec_df['有價證券代號及名稱'].str.split('　').str[0]
         elec_df['Ticker'] = elec_df['Code'] + ".TW"
         
-        # 修正：TradingView 免費 Widget 載入台股最精準無誤的前綴是 TAIEX
-        elec_df['TVSymbol'] = "TAIEX:" + elec_df['Code']
+        # 修正：TradingView 免費 Widget 載入台股最精準無誤的前綴是 TWSE
+        elec_df['TVSymbol'] = "TWSE:" + elec_df['Code']
 
         return elec_df[['Ticker', '產業別', 'TVSymbol']].values.tolist()
     except Exception as e:
         print("取得股票清單失敗:", e)
-        return [["2330.TW", "半導體業", "TAIEX:2330"]]
+        return [["2330.TW", "半導體業", "TWSE:2330"]]
 
 
 # ==========================================
