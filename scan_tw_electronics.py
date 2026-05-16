@@ -5,7 +5,7 @@ import requests
 import io
 
 # ==========================================
-# 1. 自動獲取台股上市電子股清單
+# 1. 自動獲取台股上市電子股清單 (後台使用 .TW 格式)
 # ==========================================
 def get_tw_electronics_list():
     try:
@@ -30,7 +30,6 @@ def backtest_strategy(df_history, ma_series):
     in_position = False
     buy_price_raw, buy_date, buy_day_index = 0.0, None, -1
     trade_logs = []
-    # 台股交易稅費 (買進 0.1425%, 賣出 0.4425% 含證交稅)
     fee_buy, fee_sell = 0.001425, (0.001425 + 0.003)
     start_idx = ma_series.first_valid_index()
     if start_idx is None: return -999, 0, 0, []
@@ -83,11 +82,10 @@ def main():
     tickers = [x[0] for x in ticker_info]
     industry_map = {x[0]: x[1] for x in ticker_info}
 
-    # 過去 10 天日均量 > 3000張 (3,000,000 股)
     vol_data = yf.download(tickers, period="10d", group_by='ticker', progress=False)
     valid_tickers = [t for t in tickers if t in vol_data and vol_data[t]['Volume'].tail(5).mean() > 3000000]
 
-    print(f"篩選出 {len(valid_tickers)} 檔符合門檻標的。執行回測並產出 index.html...")
+    print(f"篩選出 {len(valid_tickers)} 檔標的。執行回測並產出 index.html...")
     full_data = yf.download(valid_tickers, period="3y", auto_adjust=True, group_by='ticker', progress=False)
     
     all_cards = []
@@ -100,12 +98,12 @@ def main():
             curr_p, ma_val = s_data['Close'].iloc[-1], s_data['Close'].rolling(best_ma).mean().iloc[-1]
             diff = (curr_p / ma_val) - 1
             
-            # 篩選：股價距離 MA 均線正負 1% 內
             if abs(diff) <= 0.01:
+                # 關鍵點：在這裡把 "2308.TW" 切開，只留下純數字 "2308"
                 pure_symbol = t.split('.')[0]
                 log_rows = "".join([f"<tr class='{'table-success' if l['is_win'] else ''}'><td>{l['buy_date']}</td><td>{l['buy_p']}</td><td>{l['sell_date']}</td><td>{l['sell_p']}</td><td>{l['ret']}</td></tr>" for l in logs])
                 
-                # 記憶卡片 HTML：直接使用官方封裝好的標準 Embed iframe，強制傳入台股代號與均線參數
+                # 這裡完美對接 TradingView 官方 JS 標準 Widget，鎖死台股格式
                 card_html = f'''
                 <div class="card mb-4 shadow">
                     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
@@ -119,14 +117,29 @@ def main():
                         <p><b>{best_ma}MA 偏離:</b> {diff*100:.2f}% | <b>現價:</b> {curr_p:.2f}</p>
                         <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#logs_{pure_symbol}">對帳單 ({count}筆)</button>
                         <div class="collapse" id="logs_{pure_symbol}">
-                            <div class="table-responsive mb-3" style="max-height: 250px;"><table class="table table-sm small text-center"><thead class="table-light"><tr><th>買入日期</th><th>買入價</th><th>賣出日期</th><th>賣出價</th><th>損益</th></tr></thead><tbody>{log_rows}</tbody></table></div>
+                            <div class="table-responsive mb-3" style="max-height: 250px;"><table class="table table-sm small text-center"><thead class="table-light"><tr><th>買入</th><th>價</th><th>賣出</th><th>價</th><th>損益</th></tr></thead><tbody>{log_rows}</tbody></table></div>
                         </div>
                         
-                        <div id="tv_{pure_symbol}" style="height:400px;">
-                            <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tv_{pure_symbol}&symbol=TWSE%3A{pure_symbol}&interval=D&theme=light&style=1&timezone=Asia%2FTaipei&studies=%5B%7B%22id%22%3A%22MASimple%40tv-basicstudies%22%2C%22inputs%22%3A%7B%22length%22%3A{best_ma}%7D%7D%5D" 
-                                    style="width: 100%; height: 100%; border: none;" 
-                                    allowfullscreen="true">
-                            </iframe>
+                        <div class="tradingview-widget-container" style="height:400px; position:relative;">
+                            <div id="tv_{pure_symbol}" style="height:100%;"></div>
+                            <script type="text/javascript">
+                                if (typeof TradingView !== "undefined") {{
+                                    new TradingView.widget({{
+                                        "width": "100%",
+                                        "height": "100%",
+                                        "symbol": "TWSE:{pure_symbol}",
+                                        "interval": "D",
+                                        "timezone": "Asia/Taipei",
+                                        "theme": "light",
+                                        "style": "1",
+                                        "locale": "zh_TW",
+                                        "toolbar_bg": "#f1f3f6",
+                                        "enable_publishing": false,
+                                        "hide_top_toolbar": true,
+                                        "container_id": "tv_{pure_symbol}"
+                                    }});
+                                }}
+                            </script>
                         </div>
                     </div>
                 </div>'''
@@ -136,7 +149,6 @@ def main():
 
     all_cards.sort(key=lambda x: x['ret'], reverse=True)
     
-    # 產出大外殼 index.html 
     with open("index.html", "w", encoding="utf-8") as f:
         html_cards = "".join([c['html'] for c in all_cards])
         f.write(f'''<!DOCTYPE html>
@@ -146,6 +158,7 @@ def main():
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <title>台股掃描儀</title>
 </head>
 <body class="bg-light py-5">
