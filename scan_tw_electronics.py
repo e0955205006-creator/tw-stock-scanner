@@ -24,13 +24,13 @@ def get_tw_electronics_list():
         elec_df['Code'] = elec_df['有價證券代號及名稱'].str.split('　').str[0]
         elec_df['Ticker'] = elec_df['Code'] + ".TW"
         
-        # 修正 1：TradingView 官方免費 Widget 最穩定的台股前綴其實是 TWSE
-        elec_df['TVSymbol'] = "TWSE:" + elec_df['Code']
+        # 修正：TradingView 免費 Widget 載入台股最精準無誤的前綴是 TAIEX
+        elec_df['TVSymbol'] = "TAIEX:" + elec_df['Code']
 
         return elec_df[['Ticker', '產業別', 'TVSymbol']].values.tolist()
     except Exception as e:
         print("取得股票清單失敗:", e)
-        return [["2330.TW", "半導體業", "TWSE:2330"]]
+        return [["2330.TW", "半導體業", "TAIEX:2330"]]
 
 
 # ==========================================
@@ -47,7 +47,6 @@ def backtest_strategy(df_history, ma_series):
     buy_day_index = -1
     trade_logs = []
 
-    # 台股交易成本
     fee_buy = 0.001425
     fee_sell = 0.001425 + 0.003
 
@@ -195,10 +194,9 @@ def main():
                         <td>{l['ret']}</td>
                     </tr>"""
 
-                # 修正 2：JavaScript 內嵌字串中，如果你使用字串插補 {best_ma}，
-                # 必須確保傳給 TradingView 的 length 是純整數數字型態，否則圖表套用指標時會崩潰跳回 Apple。
                 best_ma_int = int(best_ma)
 
+                # 重點修正：對所有不屬於 Python 插值的 JavaScript 大括號做「雙重化 {{ }} 逸出」處理
                 card_html = f"""
                 <div class="card mb-4 shadow">
                     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
@@ -317,7 +315,6 @@ def main():
     html_cards = "".join([c['html'] for c in all_cards])
 
     with open("index.html", "w", encoding="utf-8") as f:
-        # 修正 3：修正了 HTML 字串插補的大括號對齊，確保 index.html 能順利完整生成
         f.write(f"""<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
