@@ -77,7 +77,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股掃描程序...")
+    print("啟動台股電子股全自動掃描儀...")
     
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
@@ -105,7 +105,7 @@ def main():
                 pure_symbol = t.split('.')[0]
                 log_rows = "".join([f"<tr class='{'table-success' if l['is_win'] else ''}'><td>{l['buy_date']}</td><td>{l['buy_p']}</td><td>{l['sell_date']}</td><td>{l['sell_p']}</td><td>{l['ret']}</td></tr>" for l in logs])
                 
-                # 記憶卡片 HTML：採用 TradingView 官方最標準乾淨的內嵌參數
+                # 記憶卡片 HTML：直接使用官方封裝好的標準 Embed iframe，強制傳入台股代號與均線參數
                 card_html = f'''
                 <div class="card mb-4 shadow">
                     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
@@ -121,34 +121,13 @@ def main():
                         <div class="collapse" id="logs_{pure_symbol}">
                             <div class="table-responsive mb-3" style="max-height: 250px;"><table class="table table-sm small text-center"><thead class="table-light"><tr><th>買入日期</th><th>買入價</th><th>賣出日期</th><th>賣出價</th><th>損益</th></tr></thead><tbody>{log_rows}</tbody></table></div>
                         </div>
-                        <div id="tv_{pure_symbol}" style="height:400px;"></div>
-                        <script>
-                            new TradingView.widget({{
-                              "width": "100%",
-                              "height": 400,
-                              "symbol": "TWSE:{pure_symbol}",
-                              "interval": "D",
-                              "timezone": "Asia/Taipei",
-                              "theme": "light",
-                              "style": "1",
-                              "locale": "zh_TW",
-                              "toolbar_bg": "#f1f3f6",
-                              "enable_publishing": false,
-                              "hide_top_toolbar": true,
-                              "hide_legend": false,
-                              "save_image": false,
-                              "container_id": "tv_{pure_symbol}",
-                              "studies": [{{ "id": "MASimple@tv-basicstudies", "inputs": {{ "length": {best_ma} }} }}],
-                              "overrides": {{ 
-                                "mainSeriesProperties.candleStyle.upColor": "#f63538", 
-                                "mainSeriesProperties.candleStyle.downColor": "#1aa308",
-                                "mainSeriesProperties.candleStyle.borderUpColor": "#f63538", 
-                                "mainSeriesProperties.candleStyle.borderDownColor": "#1aa308",
-                                "mainSeriesProperties.candleStyle.wickUpColor": "#f63538", 
-                                "mainSeriesProperties.candleStyle.wickDownColor": "#1aa308"
-                              }}
-                            }});
-                        </script>
+                        
+                        <div id="tv_{pure_symbol}" style="height:400px;">
+                            <iframe src="https://s.tradingview.com/widgetembed/?frameElementId=tv_{pure_symbol}&symbol=TWSE%3A{pure_symbol}&interval=D&theme=light&style=1&timezone=Asia%2FTaipei&studies=%5B%7B%22id%22%3A%22MASimple%40tv-basicstudies%22%2C%22inputs%22%3A%7B%22length%22%3A{best_ma}%7D%7D%5D" 
+                                    style="width: 100%; height: 100%; border: none;" 
+                                    allowfullscreen="true">
+                            </iframe>
+                        </div>
                     </div>
                 </div>'''
                 all_cards.append({'ret': ret, 'html': card_html})
@@ -157,7 +136,7 @@ def main():
 
     all_cards.sort(key=lambda x: x['ret'], reverse=True)
     
-    # 產出大外殼 index.html (tv.js 移至 head 確保優先載入)
+    # 產出大外殼 index.html 
     with open("index.html", "w", encoding="utf-8") as f:
         html_cards = "".join([c['html'] for c in all_cards])
         f.write(f'''<!DOCTYPE html>
@@ -167,7 +146,6 @@ def main():
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <title>台股掃描儀</title>
 </head>
 <body class="bg-light py-5">
