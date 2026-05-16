@@ -18,19 +18,20 @@ def get_tw_electronics_list():
 
         elec_categories = [
             '半導體業', '電腦及週邊設備業', '光電業', '通信網路業',
-            '電子零組件業', '電子通路業', '資訊服務業', '其他電子業'
+            '電子零組件業', '電子通路業', '資訊服務業', '其他電子业'
         ]
 
         elec_df = df[df['產業別'].isin(elec_categories)].copy()
         elec_df['Code'] = elec_df['有價證券代號及名稱'].str.split('　').str[0]
         elec_df['Ticker'] = elec_df['Code'] + ".TW"
         
-        elec_df['TVSymbol'] = "TAIEX:" + elec_df['Code']
+        # 修正：配合您測試成功的格式，全面改為 TAIEX-代號 (例如 TAIEX-2308)
+        elec_df['TVSymbol'] = "TAIEX-" + elec_df['Code']
 
         return elec_df[['Ticker', '產業別', 'TVSymbol']].values.tolist()
     except Exception as e:
         print("取得股票清單失敗:", e)
-        return [["2330.TW", "半導體業", "TAIEX:2330"]]
+        return [["2330.TW", "半導體業", "TAIEX-2330"]]
 
 
 # ==========================================
@@ -67,7 +68,6 @@ def backtest_strategy(df_history, ma_series):
         trigger_buy = ma * 1.015
 
         if not in_position:
-            # 修正：確保使用 Python 的標準 'and'
             if high > trigger_buy and low <= trigger_buy:
                 buy_price_raw = trigger_buy
                 buy_date = date
@@ -126,7 +126,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股掃描儀 (Actions 修正穩定版)...")
+    print("啟動台股電子股掃描儀 (TAIEX-連字號最佳化版)...")
 
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
@@ -195,7 +195,6 @@ def main():
                         <td>{l['ret']}</td>
                     </tr>"""
 
-                # 安全做法：直接用靜態 HTML 範本，避免 f-string 解析大括號衝突
                 card_template = """
                 <div class="card mb-4 shadow">
                     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
@@ -269,7 +268,6 @@ def main():
                 </div>
                 """
                 
-                # 執行可靠的純文字替換
                 filled_html = (card_template
                     .replace("@TICKER@", str(t))
                     .replace("@INDUSTRY@", str(industry_map[t]))
@@ -296,7 +294,6 @@ def main():
     all_cards.sort(key=lambda x: x['ret'], reverse=True)
     html_cards = "".join([c['html'] for c in all_cards])
 
-    # 產出最終大外殼 (不使用 f-string，防大括號地雷)
     base_template = """<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
