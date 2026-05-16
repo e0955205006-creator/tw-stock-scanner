@@ -116,7 +116,7 @@ def main():
                             new TradingView.widget({{
                               "width": "100%",
                               "height": 400,
-                              "symbol": "TWSE:{pure_symbol}.TW",
+                              "symbol": "TWSE:{pure_symbol}",
                               "interval": "D",
                               "timezone": "Asia/Taipei",
                               "theme": "light",
@@ -127,8 +127,6 @@ def main():
                               "hide_top_toolbar": true,
                               "hide_legend": false,
                               "container_id": "tv_{pure_symbol}",
-                              "exchange": "TWSE",
-                              "data_status": "streaming",
                               "studies": [{{ "id": "MASimple@tv-basicstudies", "inputs": {{ "length": {best_ma} }} }}],
                               "overrides": {{ 
                                 "mainSeriesProperties.candleStyle.upColor": "#f63538", 
@@ -147,7 +145,6 @@ def main():
 
     all_cards.sort(key=lambda x: x['ret'], reverse=True)
     
-    # 產出 index.html (注意 head 中的 tv.js)
     with open("index.html", "w", encoding="utf-8") as f:
         html_cards = "".join([c['html'] for c in all_cards])
         f.write(f'''<!DOCTYPE html>
