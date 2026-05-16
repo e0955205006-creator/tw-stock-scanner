@@ -65,7 +65,7 @@ def backtest_strategy(df_history, ma_series):
         trigger_buy = ma * 1.015
 
         if not in_position:
-            if high > trigger_buy and low <= trigger_buy:
+            if high > trigger_buy && low <= trigger_buy:
                 buy_price_raw = trigger_buy
                 buy_date = date
                 in_position = True
@@ -74,7 +74,7 @@ def backtest_strategy(df_history, ma_series):
                     continue
         else:
             exit_p = None
-            if i == buy_day_index + 1 and subset['Close'].iloc[i - 1] < ma_subset.iloc[i - 1]:
+            if i == buy_day_index + 1 && subset['Close'].iloc[i - 1] < ma_subset.iloc[i - 1]:
                 exit_p = open_p
             elif close < ma:
                 exit_p = close
@@ -123,7 +123,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股掃描儀 (Lightweight Charts 寬度修補版)...")
+    print("啟動台股電子股掃描儀 (Lightweight Charts 穩定版)...")
 
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
@@ -288,8 +288,6 @@ def main():
                             loaded_{pure_symbol} = true;
 
                             const chartContainer = document.getElementById('chart_{pure_symbol}');
-                            
-                            // 關鍵修正：確保寬度不為 0，如果還沒完全展開則預設採用滿版估計寬度
                             const targetWidth = chartContainer.clientWidth || chartContainer.parentElement.clientWidth || 800;
 
                             const chart = LightweightCharts.createChart(chartContainer, {{
@@ -299,7 +297,7 @@ def main():
                                 grid: {{ vertLines: {{ color: '#f5f5f5' }}, horzLines: {{ color: '#f5f5f5' }} }},
                                 crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }},
                                 priceScale: {{ borderColor: '#dddddd' }},
-                                timeScale: {{ borderColor: '#dddddd', timeVisible: true, secondsVisible: false }},
+                                timeScale: {{ borderColor: '#dddddd', timeVisible: true }},
                             }});
 
                             const candlestickSeries = chart.addCandlestickSeries({{
@@ -322,7 +320,6 @@ def main():
                             const maData = {ma_json};
                             maSeries.setData(maData);
 
-                            // 延遲 50 毫秒強制再次刷新尺寸補丁，對齊彈性排版
                             setTimeout(() => {{
                                 chart.resize(chartContainer.clientWidth || chartContainer.parentElement.clientWidth, 400);
                             }}, 50);
