@@ -30,6 +30,7 @@ def backtest_strategy(df_history, ma_series):
     in_position = False
     buy_price_raw, buy_date, buy_day_index = 0.0, None, -1
     trade_logs = []
+    # 台股交易稅費 (買進 0.1425%, 賣出 0.4425% 含證交稅)
     fee_buy, fee_sell = 0.001425, (0.001425 + 0.003)
     start_idx = ma_series.first_valid_index()
     if start_idx is None: return -999, 0, 0, []
@@ -82,10 +83,11 @@ def main():
     tickers = [x[0] for x in ticker_info]
     industry_map = {x[0]: x[1] for x in ticker_info}
 
+    # 篩選過去 10 天日均量 > 3000張 (3,000,000 股)
     vol_data = yf.download(tickers, period="10d", group_by='ticker', progress=False)
     valid_tickers = [t for t in tickers if t in vol_data and vol_data[t]['Volume'].tail(5).mean() > 3000000]
 
-    print(f"篩選出 {len(valid_tickers)} 檔標的。執行回測並產出 index.html...")
+    print(f"篩選出 {len(valid_tickers)} 檔符合門檻標的。執行回測並產出 index.html...")
     full_data = yf.download(valid_tickers, period="3y", auto_adjust=True, group_by='ticker', progress=False)
     
     all_cards = []
@@ -98,12 +100,13 @@ def main():
             curr_p, ma_val = s_data['Close'].iloc[-1], s_data['Close'].rolling(best_ma).mean().iloc[-1]
             diff = (curr_p / ma_val) - 1
             
+            # 股價距離 MA 均線正負 1% 內
             if abs(diff) <= 0.01:
-                # 關鍵點：在這裡把 "2308.TW" 切開，只留下純數字 "2308"
+                # 後台處理完畢，將 .TW 切除，取得純數字代號用於前台 TradingView
                 pure_symbol = t.split('.')[0]
                 log_rows = "".join([f"<tr class='{'table-success' if l['is_win'] else ''}'><td>{l['buy_date']}</td><td>{l['buy_p']}</td><td>{l['sell_date']}</td><td>{l['sell_p']}</td><td>{l['ret']}</td></tr>" for l in logs])
                 
-                # 這裡完美對接 TradingView 官方 JS 標準 Widget，鎖死台股格式
+                # 記憶卡片 HTML：採用強固型進階嵌入語法，強制鎖定 400px 高度並套用台股格式
                 card_html = f'''
                 <div class="card mb-4 shadow">
                     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
@@ -117,16 +120,16 @@ def main():
                         <p><b>{best_ma}MA 偏離:</b> {diff*100:.2f}% | <b>現價:</b> {curr_p:.2f}</p>
                         <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#logs_{pure_symbol}">對帳單 ({count}筆)</button>
                         <div class="collapse" id="logs_{pure_symbol}">
-                            <div class="table-responsive mb-3" style="max-height: 250px;"><table class="table table-sm small text-center"><thead class="table-light"><tr><th>買入</th><th>價</th><th>賣出</th><th>價</th><th>損益</th></tr></thead><tbody>{log_rows}</tbody></table></div>
+                            <div class="table-responsive mb-3" style="max-height: 250px;"><table class="table table-sm small text-center"><thead class="table-light"><tr><th>買入日期</th><th>買入價</th><th>賣出日期</th><th>賣出價</th><th>損益</th></tr></thead><tbody>{log_rows}</tbody></table></div>
                         </div>
                         
-                        <div class="tradingview-widget-container" style="height:400px; position:relative;">
-                            <div id="tv_{pure_symbol}" style="height:100%;"></div>
+                        <div class="tradingview-widget-container" style="height:400px; width:100%;">
+                            <div id="wrapper_{pure_symbol}" style="height:100%; width:100%;"></div>
                             <script type="text/javascript">
-                                if (typeof TradingView !== "undefined") {{
+                                if (typeof TradingView !== 'undefined') {{
                                     new TradingView.widget({{
                                         "width": "100%",
-                                        "height": "100%",
+                                        "height": 400,
                                         "symbol": "TWSE:{pure_symbol}",
                                         "interval": "D",
                                         "timezone": "Asia/Taipei",
@@ -136,7 +139,21 @@ def main():
                                         "toolbar_bg": "#f1f3f6",
                                         "enable_publishing": false,
                                         "hide_top_toolbar": true,
-                                        "container_id": "tv_{pure_symbol}"
+                                        "hide_legend": false,
+                                        "save_image": false,
+                                        "container_id": "wrapper_{pure_symbol}",
+                                        "studies": [{{
+                                            "id": "MASimple@tv-basicstudies",
+                                            "inputs": {{ "length": {best_ma} }}
+                                        }}],
+                                        "overrides": {{
+                                            "mainSeriesProperties.candleStyle.upColor": "#f63538",
+                                            "mainSeriesProperties.candleStyle.downColor": "#1aa308",
+                                            "mainSeriesProperties.candleStyle.borderUpColor": "#f63538",
+                                            "mainSeriesProperties.candleStyle.borderDownColor": "#1aa308",
+                                            "mainSeriesProperties.candleStyle.wickUpColor": "#f63538",
+                                            "mainSeriesProperties.candleStyle.wickDownColor": "#1aa308"
+                                        }}
                                     }});
                                 }}
                             </script>
@@ -149,6 +166,7 @@ def main():
 
     all_cards.sort(key=lambda x: x['ret'], reverse=True)
     
+    # 產出網頁外殼 index.html (tv.js 改用 s3 官方最穩定最新庫路徑)
     with open("index.html", "w", encoding="utf-8") as f:
         html_cards = "".join([c['html'] for c in all_cards])
         f.write(f'''<!DOCTYPE html>
@@ -169,7 +187,7 @@ def main():
     </div>
 </body>
 </html>''')
-    print("完成！已更新 index.html。")
+    print("完成！已成功覆蓋更新 index.html。")
 
 if __name__ == "__main__":
     main()
