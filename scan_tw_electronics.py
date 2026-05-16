@@ -2,6 +2,7 @@ import yfinance as yf
 import pandas as pd
 import datetime
 import requests
+import json
 
 # ==========================================
 # 1. 取得台股上市電子股
@@ -23,14 +24,11 @@ def get_tw_electronics_list():
         elec_df = df[df['產業別'].isin(elec_categories)].copy()
         elec_df['Code'] = elec_df['有價證券代號及名稱'].str.split('　').str[0]
         elec_df['Ticker'] = elec_df['Code'] + ".TW"
-        
-        # 修正：TradingView 免費 Widget 載入台股最精準無誤的前綴是 TWSE
-        elec_df['TVSymbol'] = "TWSE:" + elec_df['Code']
 
-        return elec_df[['Ticker', '產業別', 'TVSymbol']].values.tolist()
+        return elec_df[['Ticker', '產業別', 'Code']].values.tolist()
     except Exception as e:
         print("取得股票清單失敗:", e)
-        return [["2330.TW", "半導體業", "TWSE:2330"]]
+        return [["2330.TW", "半導體業", "2330"]]
 
 
 # ==========================================
@@ -125,12 +123,11 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股掃描...")
+    print("啟動台股電子股掃描儀 (Lightweight Charts 版)...")
 
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
     industry_map = {x[0]: x[1] for x in ticker_info}
-    tvsymbol_map = {x[0]: x[2] for x in ticker_info}
 
     print("下載成交量資料...")
     vol_data = yf.download(
@@ -175,12 +172,39 @@ def main():
 
             best_ma, ret, win, count, logs = find_best_ma(s_data)
             curr_p = s_data['Close'].iloc[-1]
-            ma_val = s_data['Close'].rolling(best_ma).mean().iloc[-1]
+            
+            # 計算最佳 MA 序列
+            ma_series = s_data['Close'].rolling(best_ma).mean()
+            ma_val = ma_series.iloc[-1]
             diff = (curr_p / ma_val) - 1
 
             if abs(diff) <= 0.01:
                 pure_symbol = t.split('.')[0]
-                tv_symbol = tvsymbol_map[t]
+
+                # 準備要餵給 Lightweight Charts 的資料 (過去120天，避免資料量過大卡頓)
+                chart_subset = s_data.tail(120)
+                ma_subset = ma_series.tail(120)
+                
+                ohlc_list = []
+                ma_list = []
+                for idx, row in chart_subset.iterrows():
+                    time_str = idx.strftime('%Y-%m-%d')
+                    ohlc_list.append({
+                        "time": time_str,
+                        "open": float(row['Open']),
+                        "high": float(row['High']),
+                        "low": float(row['Low']),
+                        "close": float(row['Close'])
+                    })
+                    if not pd.isna(ma_subset.loc[idx]):
+                        ma_list.append({
+                            "time": time_str,
+                            "value": float(ma_subset.loc[idx])
+                        })
+
+                # 將資料序列化為 JSON 字串
+                ohlc_json = json.dumps(ohlc_list)
+                ma_json = json.dumps(ma_list)
 
                 log_rows = ""
                 for l in logs:
@@ -194,9 +218,6 @@ def main():
                         <td>{l['ret']}</td>
                     </tr>"""
 
-                best_ma_int = int(best_ma)
-
-                # 重點修正：對所有不屬於 Python 插值的 JavaScript 大括號做「雙重化 {{ }} 逸出」處理
                 card_html = f"""
                 <div class="card mb-4 shadow">
                     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
@@ -258,7 +279,7 @@ def main():
                             載入圖表
                         </button>
 
-                        <div id="wrapper_{pure_symbol}" style="height:400px; width:100%; border:1px solid #eee;"></div>
+                        <div id="chart_{pure_symbol}" style="height:400px; width:100%; border:1px solid #eee; background-color: #fff;"></div>
 
                         <script>
                         let loaded_{pure_symbol} = false;
@@ -266,37 +287,43 @@ def main():
                             if (loaded_{pure_symbol}) return;
                             loaded_{pure_symbol} = true;
 
-                            new TradingView.widget({{
-                                "width": "100%",
-                                "height": 400,
-                                "symbol": "{tv_symbol}",
-                                "interval": "D",
-                                "timezone": "Asia/Taipei",
-                                "theme": "light",
-                                "style": "1",
-                                "locale": "zh_TW",
-                                "toolbar_bg": "#f1f3f6",
-                                "enable_publishing": false,
-                                "hide_top_toolbar": true,
-                                "hide_legend": false,
-                                "save_image": false,
-                                "container_id": "wrapper_{pure_symbol}",
-                                "studies": [
-                                    {{
-                                        "id": "MASimple@tv-basicstudies",
-                                        "inputs": {{
-                                            "length": {best_ma_int}
-                                        }}
-                                    }}
-                                ],
-                                "overrides": {{
-                                    "mainSeriesProperties.candleStyle.upColor": "#f63538",
-                                    "mainSeriesProperties.candleStyle.downColor": "#1aa308",
-                                    "mainSeriesProperties.candleStyle.borderUpColor": "#f63538",
-                                    "mainSeriesProperties.candleStyle.borderDownColor": "#1aa308",
-                                    "mainSeriesProperties.candleStyle.wickUpColor": "#f63538",
-                                    "mainSeriesProperties.candleStyle.wickDownColor": "#1aa308"
-                                }}
+                            const chartContainer = document.getElementById('chart_{pure_symbol}');
+                            const chart = LightweightCharts.createChart(chartContainer, {{
+                                width: chartContainer.clientWidth,
+                                height: 400,
+                                layout: {{ backgroundColor: '#ffffff', textColor: '#333' }},
+                                grid: {{ vertLines: {{ color: '#f0f0f0' }}, horzLines: {{ color: '#f0f0f0' }} }},
+                                crosshair: {{ mode: LightweightCharts.CrosshairMode.Normal }},
+                                priceScale: {{ borderColor: '#cccccc' }},
+                                timeScale: {{ borderColor: '#cccccc' }},
+                            }});
+
+                            // 建立 K 線序列 (設定台股紅漲綠跌習慣)
+                            const candlestickSeries = chart.addCandlestickSeries({{
+                                upColor: '#f63538',
+                                downColor: '#1aa308',
+                                borderUpColor: '#f63538',
+                                borderDownColor: '#1aa308',
+                                wickUpColor: '#f63538',
+                                wickDownColor: '#1aa308',
+                            }});
+
+                            // 餵入 Python 準備好的純原生 K 線資料
+                            const rawData = {ohlc_json};
+                            candlestickSeries.setData(rawData);
+
+                            // 建立並繪製 Python 幫忙寻优出来的最佳 MA 均線
+                            const maSeries = chart.addLineSeries({{
+                                color: '#2196F3',
+                                lineWidth: 2,
+                                title: '{best_ma}MA'
+                            }});
+                            const maData = {ma_json};
+                            maSeries.setData(maData);
+
+                            // 響應式視窗縮放
+                            window.addEventListener('resize', () => {{
+                                chart.resize(chartContainer.clientWidth, 400);
                             }});
                         }}
                         </script>
@@ -322,7 +349,7 @@ def main():
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-<script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 <title>台股電子股掃描儀</title>
 </head>
 <body class="bg-light py-5">
