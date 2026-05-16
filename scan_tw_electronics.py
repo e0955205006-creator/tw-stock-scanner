@@ -4,7 +4,9 @@ import datetime
 import requests
 import io
 
+# ==========================================
 # 1. 自動獲取台股上市電子股清單
+# ==========================================
 def get_tw_electronics_list():
     try:
         url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
@@ -20,12 +22,15 @@ def get_tw_electronics_list():
     except:
         return [["2330.TW", "半導體業"]]
 
+# ==========================================
 # 2. 核心回測邏輯 (含台股稅費)
+# ==========================================
 def backtest_strategy(df_history, ma_series):
     total_return, trades_count, success_trades = 0.0, 0, 0
     in_position = False
     buy_price_raw, buy_date, buy_day_index = 0.0, None, -1
     trade_logs = []
+    # 台股交易稅費 (買進 0.1425%, 賣出 0.4425% 含證交稅)
     fee_buy, fee_sell = 0.001425, (0.001425 + 0.003)
     start_idx = ma_series.first_valid_index()
     if start_idx is None: return -999, 0, 0, []
@@ -67,19 +72,22 @@ def find_best_ma(s_data):
             best_ret, best_res = ret, (ma_len, ret, win, count, logs)
     return best_res
 
+# ==========================================
 # 3. 主執行程序
+# ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股掃描程序...")
+    print("啟動台股電子股掃描程序...")
     
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
     industry_map = {x[0]: x[1] for x in ticker_info}
 
+    # 過去 10 天日均量 > 3000張 (3,000,000 股)
     vol_data = yf.download(tickers, period="10d", group_by='ticker', progress=False)
     valid_tickers = [t for t in tickers if t in vol_data and vol_data[t]['Volume'].tail(5).mean() > 3000000]
 
-    print(f"篩選出 {len(valid_tickers)} 檔標的。執行回測並產出 index.html...")
+    print(f"篩選出 {len(valid_tickers)} 檔符合門檻標的。執行回測並產出 index.html...")
     full_data = yf.download(valid_tickers, period="3y", auto_adjust=True, group_by='ticker', progress=False)
     
     all_cards = []
@@ -92,10 +100,12 @@ def main():
             curr_p, ma_val = s_data['Close'].iloc[-1], s_data['Close'].rolling(best_ma).mean().iloc[-1]
             diff = (curr_p / ma_val) - 1
             
+            # 篩選：股價距離 MA 均線正負 1% 內
             if abs(diff) <= 0.01:
                 pure_symbol = t.split('.')[0]
                 log_rows = "".join([f"<tr class='{'table-success' if l['is_win'] else ''}'><td>{l['buy_date']}</td><td>{l['buy_p']}</td><td>{l['sell_date']}</td><td>{l['sell_p']}</td><td>{l['ret']}</td></tr>" for l in logs])
                 
+                # 記憶卡片 HTML：採用 TradingView 官方最標準乾淨的內嵌參數
                 card_html = f'''
                 <div class="card mb-4 shadow">
                     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
@@ -109,7 +119,7 @@ def main():
                         <p><b>{best_ma}MA 偏離:</b> {diff*100:.2f}% | <b>現價:</b> {curr_p:.2f}</p>
                         <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#logs_{pure_symbol}">對帳單 ({count}筆)</button>
                         <div class="collapse" id="logs_{pure_symbol}">
-                            <div class="table-responsive mb-3" style="max-height: 250px;"><table class="table table-sm small text-center"><thead class="table-light"><tr><th>買入</th><th>價</th><th>賣出</th><th>價</th><th>損益</th></tr></thead><tbody>{log_rows}</tbody></table></div>
+                            <div class="table-responsive mb-3" style="max-height: 250px;"><table class="table table-sm small text-center"><thead class="table-light"><tr><th>買入日期</th><th>買入價</th><th>賣出日期</th><th>賣出價</th><th>損益</th></tr></thead><tbody>{log_rows}</tbody></table></div>
                         </div>
                         <div id="tv_{pure_symbol}" style="height:400px;"></div>
                         <script>
@@ -126,6 +136,7 @@ def main():
                               "enable_publishing": false,
                               "hide_top_toolbar": true,
                               "hide_legend": false,
+                              "save_image": false,
                               "container_id": "tv_{pure_symbol}",
                               "studies": [{{ "id": "MASimple@tv-basicstudies", "inputs": {{ "length": {best_ma} }} }}],
                               "overrides": {{ 
@@ -141,10 +152,12 @@ def main():
                     </div>
                 </div>'''
                 all_cards.append({'ret': ret, 'html': card_html})
-        except: continue
+        except:
+            continue
 
     all_cards.sort(key=lambda x: x['ret'], reverse=True)
     
+    # 產出大外殼 index.html (tv.js 移至 head 確保優先載入)
     with open("index.html", "w", encoding="utf-8") as f:
         html_cards = "".join([c['html'] for c in all_cards])
         f.write(f'''<!DOCTYPE html>
@@ -160,6 +173,7 @@ def main():
 <body class="bg-light py-5">
     <div class="container" style="max-width:850px;">
         <h2 class="text-center mb-4">🇹🇼 台股電子股全自動掃描儀</h2>
+        <p class="text-center text-muted mb-4">更新時間：{today_dt.strftime('%Y-%m-%d %H:%M')}</p>
         {html_cards}
     </div>
 </body>
