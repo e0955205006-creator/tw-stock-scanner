@@ -25,13 +25,13 @@ def get_tw_electronics_list():
         elec_df['Code'] = elec_df['有價證券代號及名稱'].str.split('　').str[0]
         elec_df['Ticker'] = elec_df['Code'] + ".TW"
         
-        # 鎖定您測試成功的連字號格式 TAIEX-XXXX
-        elec_df['TVSymbol'] = "TAIEX-" + elec_df['Code']
+        # 鎖定您測試成功的連字號格式 TWSE-XXXX
+        elec_df['TVSymbol'] = "TWSE-" + elec_df['Code']
 
         return elec_df[['Ticker', '產業別', 'TVSymbol']].values.tolist()
     except Exception as e:
         print("取得股票清單失敗:", e)
-        return [["2330.TW", "半導體業", "TAIEX-2330"]]
+        return [["2330.TW", "半導體業", "TWSE-2330"]]
 
 
 # ==========================================
