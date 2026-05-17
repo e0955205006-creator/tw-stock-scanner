@@ -9,7 +9,7 @@ import json
 # ==========================================
 def get_tw_electronics_list():
     try:
-        url = "https://isin.TAIEX.com.tw/isin/C_public.jsp?strMode=2"
+        url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
         res = requests.get(url, timeout=10)
         df = pd.read_html(res.text)[0]
 
@@ -25,7 +25,7 @@ def get_tw_electronics_list():
         elec_df['Code'] = elec_df['有價證券代號及名稱'].str.split('　').str[0]
         elec_df['Ticker'] = elec_df['Code'] + ".TW"
         
-        # 鎖定您測試成功的連字號格式 TAIEX-XXXX
+        # 鎖定測試成功的連字號格式 TAIEX-XXXX
         elec_df['TVSymbol'] = "TAIEX-" + elec_df['Code']
 
         return elec_df[['Ticker', '產業別', 'TVSymbol']].values.tolist()
@@ -126,7 +126,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀...")
+    print("啟動台股電子股全自動安全掃描儀 (最新偏離度排序版)...")
 
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
@@ -179,7 +179,8 @@ def main():
             ma_val = s_data['Close'].rolling(best_ma).mean().iloc[-1]
             diff = (curr_p / ma_val) - 1
 
-            if abs(diff) <= 0.01:
+            # 調整：放寬篩選門檻至正負 5%，確保在極端行情下也能網羅標的
+            if abs(diff) <= 0.05:
                 pure_symbol = t.split('.')[0]
                 tv_symbol = tvsymbol_map[t]
 
@@ -284,23 +285,26 @@ def main():
                 )
 
                 all_cards.append({
-                    'ret': ret,
+                    'diff_abs': abs(diff),  # 紀錄絕對偏離度用於後續排序
                     'html': filled_html
                 })
         except Exception as e:
             print(f"{t} 發生錯誤:", e)
             continue
 
-    all_cards.sort(key=lambda x: x['ret'], reverse=True)
+    # 核心改動：改依據「與均線的絕對偏離度」由小到大排序 (最貼近均線的排在最前面)
+    all_cards.sort(key=lambda x: x['diff_abs'])
     
-    # 判斷是否有符合篩選門檻的股票，如果沒有則產生提示看板
-    if len(all_cards) > 0:
-        html_cards = "".join([c['html'] for c in all_cards])
+    # 核心改動：強制限額最多只取前 10 檔，避免個股過多導致網頁載入緩慢
+    limited_cards = all_cards[:10]
+    
+    if len(limited_cards) > 0:
+        html_cards = "".join([c['html'] for c in limited_cards])
     else:
         html_cards = """
         <div class="alert alert-info text-center shadow-sm py-5" role="alert">
             <h4 class="alert-heading mb-3">🔍 今日掃描完成</h4>
-            <p class="mb-0 text-muted">目前沒有任何台股電子股的股價偏離在指定 MA 均線的 <b>±1%</b> 範圍之內。</p>
+            <p class="mb-0 text-muted">目前沒有任何台股電子股的股價偏離在指定 MA 均線的 <b>±5%</b> 範圍之內。</p>
             <p class="small text-muted mt-2">請靜待下一個交易日收盤後的自動掃描更新。</p>
         </div>
         """
@@ -318,7 +322,7 @@ def main():
 <body class="bg-light py-5">
 <div class="container" style="max-width:850px;">
     <h2 class="text-center mb-4">🇹🇼 台股電子股全自動掃描儀</h2>
-    <p class="text-center text-muted mb-4">更新時間：@UPDATE_TIME@</p>
+    <p class="text-center text-muted mb-4">更新時間：@UPDATE_TIME@ (依據最新股價與均線偏離度排序，精選前 10 檔)</p>
     @HTML_CARDS@
 </div>
 </body>
