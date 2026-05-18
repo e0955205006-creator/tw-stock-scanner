@@ -2,40 +2,56 @@ import yfinance as yf
 import pandas as pd
 import datetime
 import requests
-import json
 
 # ==========================================
-# 1. 取得台股上市電子股
+# 1. 自動取得台股上市與上櫃電子股清單
 # ==========================================
 def get_tw_electronics_list():
+    all_stocks = []
+    
+    # 爬取上市股票 (TWSE)
     try:
-        url = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
-        res = requests.get(url, timeout=10)
+        url_twse = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
+        res = requests.get(url_twse, timeout=10)
         df = pd.read_html(res.text)[0]
-
         df.columns = df.iloc[0]
         df = df.iloc[1:]
-
-        elec_categories = [
-            '半導體業', '電腦及週邊設備業', '光電業', '通信網路業',
-            '電子零組件業', '電子通路業', '資訊服務業', '其他電子業'
-        ]
-
-        elec_df = df[df['產業別'].isin(elec_categories)].copy()
-        elec_df['Code'] = elec_df['有價證券代號及名稱'].str.split('　').str[0]
-        elec_df['Ticker'] = elec_df['Code'] + ".TW"
         
-        # 精準鎖定 TradingView 個股上市標準格式 TWSE:XXXX
-        elec_df['TVSymbol'] = "TWSE:" + elec_df['Code']
-
-        return elec_df[['Ticker', '產業別', 'TVSymbol']].values.tolist()
+        elec_categories = ['半導體業', '電腦及週邊設備業', '光電業', '通信網路業',
+                           '電子零組件業', '電子通路業', '資訊服務業', '其他電子業']
+        
+        twse_elec = df[df['產業別'].isin(elec_categories)].copy()
+        twse_elec['Code'] = twse_elec['有價證券代號及名稱'].str.split('　').str[0]
+        
+        for _, row in twse_elec.iterrows():
+            all_stocks.append([row['Code'] + ".TW", row['產業別'], row['Code'], "上市"])
     except Exception as e:
-        print("取得股票清單失敗:", e)
-        return [["2330.TW", "半導體業", "TWSE:2330"]]
+        print("取得上市股票清單失敗:", e)
+
+    # 爬取上櫃股票 (TPEx)
+    try:
+        url_tpex = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"
+        res = requests.get(url_tpex, timeout=10)
+        df = pd.read_html(res.text)[0]
+        df.columns = df.iloc[0]
+        df = df.iloc[1:]
+        
+        tpex_elec = df[df['產業別'].isin(elec_categories)].copy()
+        tpex_elec['Code'] = tpex_elec['有價證券代號及名稱'].str.split('　').str[0]
+        
+        for _, row in tpex_elec.iterrows():
+            all_stocks.append([row['Code'] + ".TWO", row['產業別'], row['Code'], "上櫃"])
+    except Exception as e:
+        print("取得上櫃股票清單失敗:", e)
+
+    if not all_stocks:
+        return [["2330.TW", "半導體業", "2330", "上市"]]
+        
+    return all_stocks
 
 
 # ==========================================
-# 2. 回測策略
+# 2. 核心回測邏輯 (含台股稅費)
 # ==========================================
 def backtest_strategy(df_history, ma_series):
     total_return = 0.0
@@ -126,14 +142,16 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀 (無條件海選精選版)...")
+    print("啟動台股電子股全自動安全掃描儀 (上市上櫃全解鎖版)...")
 
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
     industry_map = {x[0]: x[1] for x in ticker_info}
-    tvsymbol_map = {x[0]: x[2] for x in ticker_info}
+    market_map = {x[0]: x[3] for x in ticker_info}
 
-    print("下載成交量資料...")
+    print(f"總計獲取 {len(tickers)} 檔上市/上櫃電子股標的。")
+    print("下載成交量資料進行初步篩選...")
+    
     vol_data = yf.download(
         tickers,
         period="10d",
@@ -149,13 +167,14 @@ def main():
             if t not in vol_data:
                 continue
             avg_vol = vol_data[t]['Volume'].tail(5).mean()
+            # 量能門檻：5日均量 > 3000張 (3,000,000股)
             if avg_vol > 3000000:
                 valid_tickers.append(t)
         except:
             continue
 
-    print(f"符合條件股票數量: {len(valid_tickers)}")
-    print("下載歷史K線資料...")
+    print(f"符合量能條件標的數量: {len(valid_tickers)} 檔。")
+    print("下載歷史K線資料並分析均線策略...")
 
     full_data = yf.download(
         valid_tickers,
@@ -166,7 +185,7 @@ def main():
         threads=True
     )
 
-    all_cards = []
+    rows_data = []
 
     for t in valid_tickers:
         try:
@@ -179,149 +198,109 @@ def main():
             ma_val = s_data['Close'].rolling(best_ma).mean().iloc[-1]
             diff = (curr_p / ma_val) - 1
 
-            # 移除篩選門檻限制，無條件放入清單
             pure_symbol = t.split('.')[0]
-            tv_symbol = tvsymbol_map[t]
 
-            log_rows = ""
-            for l in logs:
-                row_class = "table-success" if l['is_win'] else ""
-                log_rows += f"""
-                <tr class='{row_class}'>
-                    <td>{l['buy_date']}</td>
-                    <td>{l['buy_p']}</td>
-                    <td>{l['sell_date']}</td>
-                    <td>{l['sell_p']}</td>
-                    <td>{l['ret']}</td>
-                </tr>"""
-
-            card_template = """
-            <div class="card mb-4 shadow">
-                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                    <div>
-                        <b>@TICKER@</b>
-                        <small>(@INDUSTRY@)</small>
-                        <span class="badge bg-light text-dark ms-2">@BEST_MA@MA</span>
-                    </div>
-                    <div class="text-end">
-                        <small style="color:#90ee90; font-weight:bold;">3Y淨報酬: @RET@%</small><br>
-                        <small>勝率: @WIN@% (@COUNT@次)</small>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <p><b>@BEST_MA@MA 偏離:</b> @DIFF@% | <b>現價:</b> @CURR_P@</p>
-                    <button class="btn btn-sm btn-outline-secondary mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#logs_@PURE_SYMBOL@">
-                        對帳單 (@COUNT@次)
-                    </button>
-                    <div class="collapse" id="logs_@PURE_SYMBOL@">
-                        <div class="table-responsive mb-3" style="max-height:250px;">
-                            <table class="table table-sm small text-center">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>買入日期</th><th>買入價</th><th>賣出日期</th><th>賣出價</th><th>損益</th>
-                                    </tr>
-                                </thead>
-                                <tbody>@LOG_ROWS@</tbody>
-                            </table>
-                        </div>
-                    </div>
-                    <button class="btn btn-sm btn-success mb-3" onclick="loadChart_@PURE_SYMBOL@()">載入圖表</button>
-                    <div id="wrapper_@PURE_SYMBOL@" style="height:400px; width:100%; border:1px solid #eee;"></div>
-                    <script>
-                    let loaded_@PURE_SYMBOL@ = false;
-                    function loadChart_@PURE_SYMBOL@() {
-                        if (loaded_@PURE_SYMBOL@) return;
-                        loaded_@PURE_SYMBOL@ = true;
-                        new TradingView.widget({
-                            "width": "100%",
-                            "height": 400,
-                            "symbol": "@TV_SYMBOL@",
-                            "interval": "D",
-                            "timezone": "Asia/Taipei",
-                            "theme": "light",
-                            "style": "1",
-                            "locale": "zh_TW",
-                            "toolbar_bg": "#f1f3f6",
-                            "enable_publishing": false,
-                            "hide_top_toolbar": true,
-                            "hide_legend": false,
-                            "save_image": false,
-                            "container_id": "wrapper_@PURE_SYMBOL@",
-                            "studies": [
-                                {
-                                    "id": "MASimple@tv-basicstudies",
-                                    "inputs": { "length": @BEST_MA_INT@ }
-                                }
-                              ],
-                            "overrides": {
-                                "mainSeriesProperties.candleStyle.upColor": "#f63538",
-                                "mainSeriesProperties.candleStyle.downColor": "#1aa308",
-                                "mainSeriesProperties.candleStyle.borderUpColor": "#f63538",
-                                "mainSeriesProperties.candleStyle.borderDownColor": "#1aa308",
-                                "mainSeriesProperties.candleStyle.wickUpColor": "#f63538",
-                                "mainSeriesProperties.candleStyle.wickDownColor": "#1aa308"
-                            }
-                        });
-                    }
-                    </script>
-                </div>
-            </div>
-            """
-            
-            filled_html = (card_template
-                .replace("@TICKER@", str(t))
-                .replace("@INDUSTRY@", str(industry_map[t]))
-                .replace("@BEST_MA@", str(best_ma))
-                .replace("@BEST_MA_INT@", str(int(best_ma)))
-                .replace("@RET@", f"{ret:+.1f}")
-                .replace("@WIN@", f"{win:.1f}")
-                .replace("@COUNT@", str(count))
-                .replace("@DIFF@", f"{diff*100:.2f}")
-                .replace("@CURR_P@", f"{curr_p:.2f}")
-                .replace("@PURE_SYMBOL@", str(pure_symbol))
-                .replace("@LOG_ROWS@", log_rows)
-                .replace("@TV_SYMBOL@", str(tv_symbol))
-            )
-
-            all_cards.append({
+            rows_data.append({
+                'ticker': t,
+                'symbol': pure_symbol,
+                'industry': industry_map[t],
+                'market': market_map[t],
+                'best_ma': best_ma,
+                'curr_p': curr_p,
+                'diff_pct': diff * 100,
                 'diff_abs': abs(diff),
-                'html': filled_html
+                'ret': ret,
+                'win': win,
+                'count': count
             })
         except Exception as e:
             print(f"{t} 發生錯誤:", e)
             continue
 
-    # 依據絕對偏離度排序（由小到大），精選前 10 檔最貼近均線的個股卡片
-    all_cards.sort(key=lambda x: x['diff_abs'])
-    limited_cards = all_cards[:10]
+    # 依據與均線的絕對偏離度排序（由近到遠）
+    rows_data.sort(key=lambda x: x['diff_abs'])
     
-    html_cards = "".join([c['html'] for c in limited_cards])
+    # 組合 HTML 表格列 (取消 [:10] 限制，全部輸出)
+    table_rows_html = ""
+    for idx, r in enumerate(rows_data):
+        rank = idx + 1
+        ret_color = "#f63538" if r['ret'] > 0 else "#1aa308"
+        diff_color = "#ff6b6b" if abs(r['diff_pct']) > 2 else "#2b8a3e"
+        market_badge = "bg-dark" if r['market'] == "上市" else "bg-info text-dark"
+        
+        table_rows_html += f"""
+        <tr>
+            <td class="fw-bold text-center text-muted">{rank}</td>
+            <td class="fw-bold">{r['symbol']}</td>
+            <td class="text-center"><span class="badge {market_badge}">{r['market']}</span></td>
+            <td><span class="badge bg-secondary">{r['industry']}</span></td>
+            <td class="text-end fw-bold">{r['curr_p']:.2f}</td>
+            <td class="text-center fw-bold text-primary">{r['best_ma']} MA</td>
+            <td class="text-end fw-bold" style="color: {diff_color};">{r['diff_pct']:+.2f}%</td>
+            <td class="text-end fw-bold" style="color: {ret_color};">{r['ret']:+.1f}%</td>
+            <td class="text-end">{r['win']:.1f}% ({r['count']}次)</td>
+        </tr>
+        """
 
+    # 如果完全沒有通過成交量篩選的股票，則顯示防呆提示
+    if not table_rows_html:
+        table_rows_html = """<tr><td colspan="9" class="text-center text-muted py-4">目前無符合5日均量達3000張之電子股標的。</td></tr>"""
+
+    # 大外殼範本 (100% 純數據列表，效能極佳)
     base_template = """<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-<script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-<title>台股電子股掃描儀</title>
+<title>台股上市櫃電子股均線掃描清單</title>
+<style>
+    body { background-color: #f8f9fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    .main-container { max-width: 1000px; margin-top: 50px; margin-bottom: 50px; }
+    .table-card { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); padding: 25px; border: none; }
+    .table th { background-color: #f1f3f5; color: #495057; font-weight: 600; text-align: center; }
+    .table td { vertical-align: middle; }
+</style>
 </head>
-<body class="bg-light py-5">
-<div class="container" style="max-width:850px;">
-    <h2 class="text-center mb-4">🇹🇼 台股電子股全自動掃描儀</h2>
-    <p class="text-center text-muted mb-4">更新時間：@UPDATE_TIME@ (精選前 10 檔最貼近均線個股，點擊按鈕載入真個股K線)</p>
-    @HTML_CARDS@
+<body>
+<div class="container main-container">
+    <div class="text-center mb-4">
+        <h2 class="fw-bold text-dark">🇹🇼 台股上市/上櫃電子股全自動均線監控清單</h2>
+        <p class="text-muted">更新時間：@UPDATE_TIME@ (已解鎖限制：全量列出所有符合量能門檻標的，並依偏離度由近到遠排序)</p>
+    </div>
+    
+    <div class="card table-card">
+        <div class="table-responsive">
+            <table class="table table-hover table-bordered mb-0 align-middle">
+                <thead>
+                    <tr>
+                        <th style="width: 60px;">排行</th>
+                        <th style="width: 90px;">股票代號</th>
+                        <th style="width: 70px;">市場</th>
+                        <th style="width: 150px;">產業別</th>
+                        <th style="width: 100px;">目前現價</th>
+                        <th style="width: 100px;">最佳均線</th>
+                        <th style="width: 110px;">現價偏離度</th>
+                        <th style="width: 110px;">3Y策略淨利</th>
+                        <th style="width: 130px;">回測勝率(次數)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @TABLE_ROWS@
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 </body>
 </html>"""
 
-    final_html = base_template.replace("@UPDATE_TIME@", today_dt.strftime('%Y-%m-%d %H:%M')).replace("@HTML_CARDS@", html_cards)
+    final_html = base_template.replace("@UPDATE_TIME@", today_dt.strftime('%Y-%m-%d %H:%M')).replace("@TABLE_ROWS@", table_rows_html)
 
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(final_html)
 
-    print("完成！已輸出 index.html")
+    print(f"完成！已輸出全量上市櫃數據列表至 index.html")
 
 
 if __name__ == "__main__":
