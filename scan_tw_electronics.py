@@ -142,7 +142,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀 (上市上櫃全解鎖版)...")
+    print("啟動台股電子股全自動安全掃描儀 (MA正負1%精準篩選版)...")
 
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
@@ -198,29 +198,31 @@ def main():
             ma_val = s_data['Close'].rolling(best_ma).mean().iloc[-1]
             diff = (curr_p / ma_val) - 1
 
-            pure_symbol = t.split('.')[0]
+            # 核心修正：重新鎖死「股價距離 MA 均線正負 1% 內」的嚴格門檻
+            if abs(diff) <= 0.01:
+                pure_symbol = t.split('.')[0]
 
-            rows_data.append({
-                'ticker': t,
-                'symbol': pure_symbol,
-                'industry': industry_map[t],
-                'market': market_map[t],
-                'best_ma': best_ma,
-                'curr_p': curr_p,
-                'diff_pct': diff * 100,
-                'diff_abs': abs(diff),
-                'ret': ret,
-                'win': win,
-                'count': count
-            })
+                rows_data.append({
+                    'ticker': t,
+                    'symbol': pure_symbol,
+                    'industry': industry_map[t],
+                    'market': market_map[t],
+                    'best_ma': best_ma,
+                    'curr_p': curr_p,
+                    'diff_pct': diff * 100,
+                    'diff_abs': abs(diff),
+                    'ret': ret,
+                    'win': win,
+                    'count': count
+                })
         except Exception as e:
             print(f"{t} 發生錯誤:", e)
             continue
 
-    # 依據與均線的絕對偏離度排序（由近到遠）
+    # 依據與均線的絕對偏離度排序（由小到大，最貼近 0% 偏離的排最前面）
     rows_data.sort(key=lambda x: x['diff_abs'])
     
-    # 組合 HTML 表格列 (取消 [:10] 限制，全部輸出)
+    # 組合 HTML 表格列
     table_rows_html = ""
     for idx, r in enumerate(rows_data):
         rank = idx + 1
@@ -242,18 +244,49 @@ def main():
         </tr>
         """
 
-    # 如果完全沒有通過成交量篩選的股票，則顯示防呆提示
+    # 核心改動：如果沒有任何股票符合正負 1% 的嚴格條件，改由大面板渲染提示通知
     if not table_rows_html:
-        table_rows_html = """<tr><td colspan="9" class="text-center text-muted py-4">目前無符合5日均量達3000張之電子股標的。</td></tr>"""
+        container_content_html = """
+        <div class="alert alert-info text-center shadow-sm py-5" role="alert">
+            <h4 class="alert-heading mb-3">🔍 今日掃描完成</h4>
+            <p class="mb-0 text-muted">目前沒有任何上市/上櫃台股電子股的股價偏離在指定 MA 均線的 <b>±1%</b> 範圍之內。</p>
+            <p class="small text-muted mt-2">請靜待下一個交易日收盤後的自動掃描更新。</p>
+        </div>
+        """
+    else:
+        container_content_html = f"""
+        <div class="card table-card">
+            <div class="table-responsive">
+                <table class="table table-hover table-bordered mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th style="width: 60px;">排行</th>
+                            <th style="width: 90px;">股票代號</th>
+                            <th style="width: 70px;">市場</th>
+                            <th style="width: 150px;">產業別</th>
+                            <th style="width: 100px;">目前現價</th>
+                            <th style="width: 100px;">最佳均線</th>
+                            <th style="width: 110px;">現價偏離度</th>
+                            <th style="width: 110px;">3Y策略淨利</th>
+                            <th style="width: 130px;">回測勝率(次數)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {table_rows_html}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        """
 
-    # 大外殼範本 (100% 純數據列表，效能極佳)
+    # 大外殼範本 (100% 純數據列表，無任何 JavaScript)
     base_template = """<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-<title>台股上市櫃電子股均線掃描清單</title>
+<title>台股上市櫃電子股均線精選清單</title>
 <style>
     body { background-color: #f8f9fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
     .main-container { max-width: 1000px; margin-top: 50px; margin-bottom: 50px; }
@@ -266,41 +299,20 @@ def main():
 <div class="container main-container">
     <div class="text-center mb-4">
         <h2 class="fw-bold text-dark">🇹🇼 台股上市/上櫃電子股全自動均線監控清單</h2>
-        <p class="text-muted">更新時間：@UPDATE_TIME@ (已解鎖限制：全量列出所有符合量能門檻標的，並依偏離度由近到遠排序)</p>
+        <p class="text-muted">更新時間：@UPDATE_TIME@ (嚴格篩選：僅列出最新收盤價落於最佳 MA <b>±1%</b> 範圍內標的)</p>
     </div>
     
-    <div class="card table-card">
-        <div class="table-responsive">
-            <table class="table table-hover table-bordered mb-0 align-middle">
-                <thead>
-                    <tr>
-                        <th style="width: 60px;">排行</th>
-                        <th style="width: 90px;">股票代號</th>
-                        <th style="width: 70px;">市場</th>
-                        <th style="width: 150px;">產業別</th>
-                        <th style="width: 100px;">目前現價</th>
-                        <th style="width: 100px;">最佳均線</th>
-                        <th style="width: 110px;">現價偏離度</th>
-                        <th style="width: 110px;">3Y策略淨利</th>
-                        <th style="width: 130px;">回測勝率(次數)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @TABLE_ROWS@
-                </tbody>
-            </table>
-        </div>
-    </div>
+    @CONTAINER_CONTENT@
 </div>
 </body>
 </html>"""
 
-    final_html = base_template.replace("@UPDATE_TIME@", today_dt.strftime('%Y-%m-%d %H:%M')).replace("@TABLE_ROWS@", table_rows_html)
+    final_html = base_template.replace("@UPDATE_TIME@", today_dt.strftime('%Y-%m-%d %H:%M')).replace("@CONTAINER_CONTENT@", container_content_html)
 
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(final_html)
 
-    print(f"完成！已輸出全量上市櫃數據列表至 index.html")
+    print(f"完成！已輸出精準 ±1% 數據列表至 index.html")
 
 
 if __name__ == "__main__":
