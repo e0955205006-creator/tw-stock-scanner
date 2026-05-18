@@ -51,7 +51,7 @@ def get_tw_electronics_list():
 
 
 # ==========================================
-# 2. 核心回測邏輯 (交易均已精算手續費及稅)
+# 2. 核心回測邏輯 (已修正：完全符合盤中觸及即買進)
 # ==========================================
 def backtest_strategy(df_history, ma_series):
     total_return = 0.0
@@ -84,23 +84,32 @@ def backtest_strategy(df_history, ma_series):
         ma = ma_subset.iloc[i]
         trigger_buy = ma * 1.015
 
+        # ======================
+        # 買進判定
+        # ======================
         if not in_position:
-            if high > trigger_buy and low <= trigger_buy:
+            # 修改點：只要當天最高價突破觸發點，且最低價有涵蓋到（代表盤中確實有觸及或越過這個價格）
+            if high >= trigger_buy and low <= trigger_buy:
                 buy_price_raw = trigger_buy
                 buy_date = date
                 in_position = True
                 buy_day_index = i
-                if close < ma:
-                    continue
+                # 【重要修正】徹底移除原本的收盤價跌破 MA 過濾鎖，只要觸及就判定成功進場！
+                
+        # ======================
+        # 賣出判定
+        # ======================
         else:
             exit_p = None
+
+            # 隔日開盤停損 (進場隔天，如果進場日的收盤跌破均線，開盤立刻砍)
             if i == buy_day_index + 1 and subset['Close'].iloc[i - 1] < ma_subset.iloc[i - 1]:
                 exit_p = open_p
+            # 日後收盤跌破 MA
             elif close < ma:
                 exit_p = close
 
             if exit_p is not None:
-                # 成本與計算皆包含手續費及稅金
                 cost = buy_price_raw * (1 + fee_buy)
                 proceeds = exit_p * (1 - fee_sell)
                 trade_ret = (proceeds / cost) - 1
@@ -144,7 +153,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀 (績效排序 + 展開明細版)...")
+    print("啟動台股電子股全自動安全掃描儀 (盤中觸及即買進版)...")
 
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
@@ -221,10 +230,10 @@ def main():
             print(f"{t} 發生錯誤:", e)
             continue
 
-    # 核心優化 1：改依據「3Y策略淨利」由大到小排序 (賺最多的排在最前面)
+    # 依據「3Y策略淨利」由大到小排序
     rows_data.sort(key=lambda x: x['ret'], reverse=True)
     
-    # 組合 HTML 表格列與隱藏的交易明細面板
+    # 組合 HTML 表格
     table_rows_html = ""
     for idx, r in enumerate(rows_data):
         rank = idx + 1
@@ -232,7 +241,6 @@ def main():
         diff_color = "#ff6b6b" if abs(r['diff_pct']) > 2 else "#2b8a3e"
         market_badge = "bg-dark" if r['market'] == "上市" else "bg-info text-dark"
         
-        # 建立當前股票的詳細進出對帳單 HTML 內容
         detail_rows = ""
         for l in r['logs']:
             log_win_class = "table-success" if l['is_win'] else ""
@@ -248,7 +256,6 @@ def main():
         if not detail_rows:
             detail_rows = """<tr><td colspan="5" class="text-muted">該週期內無平倉交易紀錄</td></tr>"""
         
-        # 主資料行 + 隱藏的明細行 (透過 Bootstrap Collapse 控制)
         table_rows_html += f"""
         <tr>
             <td class="fw-bold text-center text-muted">{rank}</td>
@@ -322,7 +329,6 @@ def main():
         </div>
         """
 
-    # 大外殼範本 (不依賴任何 TradingView 腳本)
     base_template = """<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -344,7 +350,7 @@ def main():
 <div class="container main-container">
     <div class="text-center mb-4">
         <h2 class="fw-bold text-dark">🇹🇼 台股上市/上櫃電子股均線狙擊監控台</h2>
-        <p class="text-muted">更新時間：@UPDATE_TIME@ (嚴格篩選：股價落於最佳 MA <b>±1%</b> 內 | 依<b>策略淨利大到小</b>排序)</p>
+        <p class="text-muted">更新時間：@UPDATE_TIME@ (嚴格篩選：股價落於最佳 MA <b>±1%</b> 內 | 盤中觸及即進場)</p>
     </div>
     
     @CONTAINER_CONTENT@
@@ -357,7 +363,7 @@ def main():
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(final_html)
 
-    print(f"完成！已輸出以績效排序且帶有明細功能的 index.html")
+    print(f"完成！已輸出全新規則的 index.html")
 
 
 if __name__ == "__main__":
