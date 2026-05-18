@@ -51,7 +51,7 @@ def get_tw_electronics_list():
 
 
 # ==========================================
-# 2. 核心回測邏輯 (含台股稅費)
+# 2. 核心回測邏輯 (交易均已精算手續費及稅)
 # ==========================================
 def backtest_strategy(df_history, ma_series):
     total_return = 0.0
@@ -64,6 +64,7 @@ def backtest_strategy(df_history, ma_series):
     buy_day_index = -1
     trade_logs = []
 
+    # 精算交易稅費：買進手續費 0.1425%, 賣出手續費 0.1425% + 證交稅 0.3%
     fee_buy = 0.001425
     fee_sell = 0.001425 + 0.003
 
@@ -99,6 +100,7 @@ def backtest_strategy(df_history, ma_series):
                 exit_p = close
 
             if exit_p is not None:
+                # 成本與計算皆包含手續費及稅金
                 cost = buy_price_raw * (1 + fee_buy)
                 proceeds = exit_p * (1 - fee_sell)
                 trade_ret = (proceeds / cost) - 1
@@ -142,7 +144,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀 (MA正負1%精準篩選版)...")
+    print("啟動台股電子股全自動安全掃描儀 (績效排序 + 展開明細版)...")
 
     ticker_info = get_tw_electronics_list()
     tickers = [x[0] for x in ticker_info]
@@ -167,7 +169,6 @@ def main():
             if t not in vol_data:
                 continue
             avg_vol = vol_data[t]['Volume'].tail(5).mean()
-            # 量能門檻：5日均量 > 3000張 (3,000,000股)
             if avg_vol > 3000000:
                 valid_tickers.append(t)
         except:
@@ -198,7 +199,7 @@ def main():
             ma_val = s_data['Close'].rolling(best_ma).mean().iloc[-1]
             diff = (curr_p / ma_val) - 1
 
-            # 核心修正：重新鎖死「股價距離 MA 均線正負 1% 內」的嚴格門檻
+            # 嚴格篩選：股價距離最佳 MA 均線正負 1% 內
             if abs(diff) <= 0.01:
                 pure_symbol = t.split('.')[0]
 
@@ -213,16 +214,17 @@ def main():
                     'diff_abs': abs(diff),
                     'ret': ret,
                     'win': win,
-                    'count': count
+                    'count': count,
+                    'logs': logs
                 })
         except Exception as e:
             print(f"{t} 發生錯誤:", e)
             continue
 
-    # 依據與均線的絕對偏離度排序（由小到大，最貼近 0% 偏離的排最前面）
-    rows_data.sort(key=lambda x: x['diff_abs'])
+    # 核心優化 1：改依據「3Y策略淨利」由大到小排序 (賺最多的排在最前面)
+    rows_data.sort(key=lambda x: x['ret'], reverse=True)
     
-    # 組合 HTML 表格列
+    # 組合 HTML 表格列與隱藏的交易明細面板
     table_rows_html = ""
     for idx, r in enumerate(rows_data):
         rank = idx + 1
@@ -230,6 +232,23 @@ def main():
         diff_color = "#ff6b6b" if abs(r['diff_pct']) > 2 else "#2b8a3e"
         market_badge = "bg-dark" if r['market'] == "上市" else "bg-info text-dark"
         
+        # 建立當前股票的詳細進出對帳單 HTML 內容
+        detail_rows = ""
+        for l in r['logs']:
+            log_win_class = "table-success" if l['is_win'] else ""
+            detail_rows += f"""
+            <tr class="{log_win_class}">
+                <td>{l['buy_date']}</td>
+                <td>{l['buy_p']}</td>
+                <td>{l['sell_date']}</td>
+                <td>{l['sell_p']}</td>
+                <td class="fw-bold">{l['ret']}</td>
+            </tr>"""
+            
+        if not detail_rows:
+            detail_rows = """<tr><td colspan="5" class="text-muted">該週期內無平倉交易紀錄</td></tr>"""
+        
+        # 主資料行 + 隱藏的明細行 (透過 Bootstrap Collapse 控制)
         table_rows_html += f"""
         <tr>
             <td class="fw-bold text-center text-muted">{rank}</td>
@@ -239,12 +258,36 @@ def main():
             <td class="text-end fw-bold">{r['curr_p']:.2f}</td>
             <td class="text-center fw-bold text-primary">{r['best_ma']} MA</td>
             <td class="text-end fw-bold" style="color: {diff_color};">{r['diff_pct']:+.2f}%</td>
-            <td class="text-end fw-bold" style="color: {ret_color};">{r['ret']:+.1f}%</td>
-            <td class="text-end">{r['win']:.1f}% ({r['count']}次)</td>
+            <td class="text-end fw-bold" style="color: {ret_color}; font-size: 1.1rem;">{r['ret']:+.1f}%</td>
+            <td class="text-center">
+                <button class="btn btn-xs btn-outline-primary py-0 px-2" style="font-size:0.75rem;" type="button" data-bs-toggle="collapse" data-bs-target="#detail_{r['symbol']}">
+                    查看明細 ({r['count']}次)
+                </button>
+            </td>
+        </tr>
+        <tr class="collapse" id="detail_{r['symbol']}">
+            <td colspan="9" class="bg-light p-3">
+                <div class="card p-2 shadow-sm border-0">
+                    <h6 class="fw-bold text-secondary mb-2">📊 {r['symbol']} 過去 3 年進出歷史對帳單 (已扣除手續費與證交稅)</h6>
+                    <div class="table-responsive" style="max-height: 250px;">
+                        <table class="table table-sm table-striped text-center small mb-0">
+                            <thead class="table-dark">
+                                <tr>
+                                    <th>買入日期</th><th>買入價格 (含費)</th>
+                                    <th>賣出日期</th><th>賣出價格 (扣費稅)</th>
+                                    <th>精算損益</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {detail_rows}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </td>
         </tr>
         """
 
-    # 核心改動：如果沒有任何股票符合正負 1% 的嚴格條件，改由大面板渲染提示通知
     if not table_rows_html:
         container_content_html = """
         <div class="alert alert-info text-center shadow-sm py-5" role="alert">
@@ -260,15 +303,15 @@ def main():
                 <table class="table table-hover table-bordered mb-0 align-middle">
                     <thead>
                         <tr>
-                            <th style="width: 60px;">排行</th>
+                            <th style="width: 50px;">排行</th>
                             <th style="width: 90px;">股票代號</th>
                             <th style="width: 70px;">市場</th>
-                            <th style="width: 150px;">產業別</th>
-                            <th style="width: 100px;">目前現價</th>
-                            <th style="width: 100px;">最佳均線</th>
-                            <th style="width: 110px;">現價偏離度</th>
+                            <th style="width: 140px;">產業別</th>
+                            <th style="width: 90px;">目前現價</th>
+                            <th style="width: 90px;">最佳均線</th>
+                            <th style="width: 100px;">現價偏離度</th>
                             <th style="width: 110px;">3Y策略淨利</th>
-                            <th style="width: 130px;">回測勝率(次數)</th>
+                            <th style="width: 110px;">進出明細</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -279,27 +322,29 @@ def main():
         </div>
         """
 
-    # 大外殼範本 (100% 純數據列表，無任何 JavaScript)
+    # 大外殼範本 (不依賴任何 TradingView 腳本)
     base_template = """<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 <title>台股上市櫃電子股均線精選清單</title>
 <style>
     body { background-color: #f8f9fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
     .main-container { max-width: 1000px; margin-top: 50px; margin-bottom: 50px; }
     .table-card { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); padding: 25px; border: none; }
-    .table th { background-color: #f1f3f5; color: #495057; font-weight: 600; text-align: center; }
-    .table td { vertical-align: middle; }
+    .table th { background-color: #f1f3f5; color: #495057; font-weight: 600; text-align: center; font-size: 0.9rem; }
+    .table td { vertical-align: middle; font-size: 0.95rem; }
+    .btn-xs { padding: 1px 5px; font-size: 0.75rem; border-radius: 3px; }
 </style>
 </head>
 <body>
 <div class="container main-container">
     <div class="text-center mb-4">
-        <h2 class="fw-bold text-dark">🇹🇼 台股上市/上櫃電子股全自動均線監控清單</h2>
-        <p class="text-muted">更新時間：@UPDATE_TIME@ (嚴格篩選：僅列出最新收盤價落於最佳 MA <b>±1%</b> 範圍內標的)</p>
+        <h2 class="fw-bold text-dark">🇹🇼 台股上市/上櫃電子股均線狙擊監控台</h2>
+        <p class="text-muted">更新時間：@UPDATE_TIME@ (嚴格篩選：股價落於最佳 MA <b>±1%</b> 內 | 依<b>策略淨利大到小</b>排序)</p>
     </div>
     
     @CONTAINER_CONTENT@
@@ -312,7 +357,7 @@ def main():
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(final_html)
 
-    print(f"完成！已輸出精準 ±1% 數據列表至 index.html")
+    print(f"完成！已輸出以績效排序且帶有明細功能的 index.html")
 
 
 if __name__ == "__main__":
