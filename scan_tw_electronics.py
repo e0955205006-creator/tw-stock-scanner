@@ -9,37 +9,29 @@ import time
 # ==========================================
 def get_tw_electronics_list():
     all_stocks = []
-    
-    # 爬取上市股票 (TWSE)
     try:
         url_twse = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
         res = requests.get(url_twse, timeout=10)
         df = pd.read_html(res.text)[0]
         df.columns = df.iloc[0]
         df = df.iloc[1:]
-        
         elec_categories = ['半導體業', '電腦及週邊設備業', '光電業', '通信網路業',
                            '電子零組件業', '電子通路業', '資訊服務業', '其他電子業']
-        
         twse_elec = df[df['產業別'].isin(elec_categories)].copy()
         twse_elec['Code'] = twse_elec['有價證券代號及名稱'].str.split('　').str[0]
-        
         for _, row in twse_elec.iterrows():
             all_stocks.append([row['Code'] + ".TW", row['產業別'], row['Code'], "上市"])
     except Exception as e:
         print("取得上市股票清單失敗:", e)
 
-    # 爬取上櫃股票 (TPEx)
     try:
         url_tpex = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"
         res = requests.get(url_tpex, timeout=10)
         df = pd.read_html(res.text)[0]
         df.columns = df.iloc[0]
         df = df.iloc[1:]
-        
         tpex_elec = df[df['產業別'].isin(elec_categories)].copy()
         tpex_elec['Code'] = tpex_elec['有價證券代號及名稱'].str.split('　').str[0]
-        
         for _, row in tpex_elec.iterrows():
             all_stocks.append([row['Code'] + ".TWO", row['產業別'], row['Code'], "上櫃"])
     except Exception as e:
@@ -47,7 +39,6 @@ def get_tw_electronics_list():
 
     if not all_stocks:
         return [["2330.TW", "半導體業", "2330", "上市"]]
-        
     return all_stocks
 
 
@@ -141,7 +132,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀 (高強度抗崩潰防護版)...")
+    print("啟動台股電子股全自動安全掃描儀 (抗 Yahoo 數據雜訊終極寬容版)...")
 
     ticker_info = get_tw_electronics_list()
     
@@ -157,24 +148,21 @@ def main():
     for item in ticker_info:
         t = item[0]
         try:
-            # 1. 下載單檔股票歷史資料
-            s_data = yf.download(t, period="3y", auto_adjust=True, progress=False, timeout=10)
+            # 🛠️ 優化 1：關閉還原股價 (auto_adjust=False)，直接拿原始 Close 比對，避免除權息計算公式落差
+            s_data = yf.download(t, period="3y", auto_adjust=False, progress=False, timeout=10)
             
-            # 🛡️ 鋼鐵防護盾：如果 Yahoo 回傳空資料，或格式不對，直接安全跳過，絕對不崩潰
             if s_data is None or s_data.empty or len(s_data) < 40:
                 continue
             if 'Volume' not in s_data.columns or 'Close' not in s_data.columns:
                 continue
 
-            # 2. 檢查 5 日流動性門檻 (放寬至 2000張 = 2,000,000股)
+            # 🛠️ 優化 2：成交量門檻再度放寬至 1000張 (1,000,000股)，全面阻斷 Yahoo 跨國漏報流動性的盲點
             avg_vol = s_data['Volume'].tail(5).mean()
-            if pd.isna(avg_vol) or avg_vol < 2000000:
+            if pd.isna(avg_vol) or avg_vol < 1000000:
                 continue
 
-            # 3. 策略與均線計算
             best_ma, ret, win, count, logs = find_best_ma(s_data)
             
-            # 確保最後一筆資料有效
             if len(s_data['Close']) < best_ma:
                 continue
                 
@@ -186,8 +174,8 @@ def main():
                 
             diff = (curr_p / ma_val) - 1
 
-            # 4. 嚴格過濾：偏離度正負 1% 內
-            if abs(diff) <= 0.01:
+            # 🛠️ 優化 3：將偏離度容許度放寬至正負 1.5% 內，預留跨國計算誤差，確保像致茂（-0.83%）這類好標的不漏抓
+            if abs(diff) <= 0.015:
                 rows_data.append({
                     'symbol': symbol_map[t],
                     'industry': industry_map[t],
@@ -202,16 +190,15 @@ def main():
                     'logs': logs
                 })
                 success_count += 1
-                print(f"🎯 發現符合標的：{symbol_map[t]} (偏離度: {diff*100:+.2f}%)")
+                print(f"🎯 成功捕獲標的：{symbol_map[t]} (偏離度: {diff*100:+.2f}%)")
                 
-            # 🕰️ 稍微拉長延遲，溫柔對待 Yahoo 伺服器防封鎖
-            time.sleep(0.2)
+            time.sleep(0.15)
 
         except Exception as e:
             print(f"⚠️ 獨立跳過錯誤股票 {t}: {e}")
             continue
 
-    print(f"掃描結束！共有 {success_count} 檔股票符合最新 ±1% 均線條件。")
+    print(f"掃描結束！共有 {success_count} 檔股票符合最新條件。")
 
     # 依據「3Y策略淨利」由大到小排序
     rows_data.sort(key=lambda x: x['ret'], reverse=True)
@@ -282,7 +269,7 @@ def main():
         container_content_html = """
         <div class="alert alert-info text-center shadow-sm py-5" role="alert">
             <h4 class="alert-heading mb-3">🔍 今日掃描完成</h4>
-            <p class="mb-0 text-muted">目前沒有任何上市/上櫃台股電子股的股價偏離在指定 MA 均線的 <b>±1%</b> 範圍之內。</p>
+            <p class="mb-0 text-muted">目前沒有任何上市/上櫃台股電子股的股價偏離在指定 MA 均線的 <b>★寬容正負 1.5%</b> 範圍之內。</p>
             <p class="small text-muted mt-2">請靜待下一個交易日收盤後的自動掃描更新。</p>
         </div>
         """
@@ -333,7 +320,7 @@ def main():
 <div class="container main-container">
     <div class="text-center mb-4">
         <h2 class="fw-bold text-dark">🇹🇼 台股上市/上櫃電子股均線狙擊監控台</h2>
-        <p class="text-muted">更新時間：@UPDATE_TIME@ (嚴格篩選：股價落於最佳 MA <b>±1%</b> 內 | 獨立安全數據源)</p>
+        <p class="text-muted">更新時間：@UPDATE_TIME@ (嚴格篩選：股價落於最佳 MA <b>±1.5% 寬容區</b> 內 | 獨立安全數據源)</p>
     </div>
     
     @CONTAINER_CONTENT@
@@ -346,7 +333,7 @@ def main():
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(final_html)
 
-    print(f"完成！已輸出抗封鎖、高防禦力的 index.html")
+    print(f"完成！已輸出抗雜訊寬容版 index.html")
 
 
 if __name__ == "__main__":
