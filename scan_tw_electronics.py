@@ -67,12 +67,12 @@ def backtest_strategy(df_history, ma_series):
     ma_subset = ma_series.loc[start_idx:]
 
     for i in range(len(subset)):
-        close = subset['Close'].iloc[i]
-        high = subset['High'].iloc[i]
-        low = subset['Low'].iloc[i]
-        open_p = subset['Open'].iloc[i]
+        close = float(subset['Close'].iloc[i])
+        high = float(subset['High'].iloc[i])
+        low = float(subset['Low'].iloc[i])
+        open_p = float(subset['Open'].iloc[i])
         date = subset.index[i].strftime('%Y-%m-%d')
-        ma = ma_subset.iloc[i]
+        ma = float(ma_subset.iloc[i])
         trigger_buy = ma * 1.015
 
         if not in_position:
@@ -83,7 +83,7 @@ def backtest_strategy(df_history, ma_series):
                 buy_day_index = i
         else:
             exit_p = None
-            if i == buy_day_index + 1 and subset['Close'].iloc[i - 1] < ma_subset.iloc[i - 1]:
+            if i == buy_day_index + 1 and float(subset['Close'].iloc[i - 1]) < float(ma_subset.iloc[i - 1]):
                 exit_p = open_p
             elif close < ma:
                 exit_p = close
@@ -132,7 +132,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀 (抗 Yahoo 數據雜訊終極寬容版)...")
+    print("啟動台股電子股全自動安全掃描儀 (全新強效多重索引修復版)...")
 
     ticker_info = get_tw_electronics_list()
     
@@ -148,15 +148,23 @@ def main():
     for item in ticker_info:
         t = item[0]
         try:
-            # 🛠️ 優化 1：關閉還原股價 (auto_adjust=False)，直接拿原始 Close 比對，避免除權息計算公式落差
             s_data = yf.download(t, period="3y", auto_adjust=False, progress=False, timeout=10)
             
             if s_data is None or s_data.empty or len(s_data) < 40:
                 continue
+
+            # 🛠️ 核心修復：強制將 yfinance 可能產生的多重索引欄位（Multi-Index）扁平化成單層欄位
+            if isinstance(s_data.columns, pd.MultiIndex):
+                s_data.columns = s_data.columns.get_level_values(0)
+
             if 'Volume' not in s_data.columns or 'Close' not in s_data.columns:
                 continue
 
-            # 🛠️ 優化 2：成交量門檻再度放寬至 1000張 (1,000,000股)，全面阻斷 Yahoo 跨國漏報流動性的盲點
+            # 轉化為一般浮點數序列，完全避免格式衝突
+            s_data['Volume'] = pd.to_numeric(s_data['Volume'], errors='coerce')
+            s_data['Close'] = pd.to_numeric(s_data['Close'], errors='coerce')
+
+            # 檢查 5 日流動性門檻 (放寬至 1000張 = 1,000,000股)
             avg_vol = s_data['Volume'].tail(5).mean()
             if pd.isna(avg_vol) or avg_vol < 1000000:
                 continue
@@ -174,7 +182,7 @@ def main():
                 
             diff = (curr_p / ma_val) - 1
 
-            # 🛠️ 優化 3：將偏離度容許度放寬至正負 1.5% 內，預留跨國計算誤差，確保像致茂（-0.83%）這類好標的不漏抓
+            # 篩選條件：偏離度正負 1.5% 內
             if abs(diff) <= 0.015:
                 rows_data.append({
                     'symbol': symbol_map[t],
@@ -192,7 +200,7 @@ def main():
                 success_count += 1
                 print(f"🎯 成功捕獲標的：{symbol_map[t]} (偏離度: {diff*100:+.2f}%)")
                 
-            time.sleep(0.15)
+            time.sleep(0.1)
 
         except Exception as e:
             print(f"⚠️ 獨立跳過錯誤股票 {t}: {e}")
@@ -320,7 +328,7 @@ def main():
 <div class="container main-container">
     <div class="text-center mb-4">
         <h2 class="fw-bold text-dark">🇹🇼 台股上市/上櫃電子股均線狙擊監控台</h2>
-        <p class="text-muted">更新時間：@UPDATE_TIME@ (嚴格篩選：股價落於最佳 MA <b>±1.5% 寬容區</b> 內 | 獨立安全數據源)</p>
+        <p class="text-muted">更新時間：@UPDATE_TIME@ (嚴格篩選：股價落於最佳 MA <b>★寬容正負 1.5% 寬容區</b> 內 | 獨立安全數據源)</p>
     </div>
     
     @CONTAINER_CONTENT@
