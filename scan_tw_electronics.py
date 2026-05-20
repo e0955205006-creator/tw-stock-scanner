@@ -145,7 +145,6 @@ def main():
 
     ticker_info = get_tw_electronics_list()
     
-    # 建立查找字典
     industry_map = {x[0]: x[1] for x in ticker_info}
     symbol_map = {x[0]: x[2] for x in ticker_info}
     market_map = {x[0]: x[3] for x in ticker_info}
@@ -155,7 +154,6 @@ def main():
 
     print(f"總計獲取 {len(ticker_info)} 檔上市/上櫃電子股標的，開始逐檔安全分析...")
 
-    # 改為單檔安全迴圈，徹底防範 yfinance 批次結構錯位地雷
     for item in ticker_info:
         t = item[0]
         try:
@@ -164,9 +162,9 @@ def main():
             if s_data.empty or len(s_data) < 200:
                 continue
 
-            # 2. 檢查 5 日流動性門檻 (成交量 > 3000張)
+            # 2. 核心修正：將 5 日流動性門檻放寬至 2000張 (2,000,000股)，防止 Yahoo 數據漏報干擾
             avg_vol = s_data['Volume'].tail(5).mean()
-            if avg_vol < 3000000:
+            if avg_vol < 2000000:
                 continue
 
             # 3. 策略與均線計算
@@ -192,7 +190,6 @@ def main():
                 })
                 success_count += 1
                 
-            # 微調間隔，避免頻繁請求被 Yahoo 阻擋
             time.sleep(0.1)
 
         except Exception as e:
@@ -334,7 +331,7 @@ def main():
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(final_html)
 
-    print(f"完成！已輸出高安全係數的獨立下載 index.html")
+    print(f"完成！已輸出全新放寬成交量門檻的 index.html")
 
 
 if __name__ == "__main__":
