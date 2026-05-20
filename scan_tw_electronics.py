@@ -2,6 +2,7 @@ import yfinance as yf
 import pandas as pd
 import datetime
 import requests
+import time
 
 # ==========================================
 # 1. 自動取得台股上市與上櫃電子股清單
@@ -51,7 +52,7 @@ def get_tw_electronics_list():
 
 
 # ==========================================
-# 2. 核心回測邏輯 (已修正：完全符合盤中觸及即買進)
+# 2. 核心回測邏輯 (盤中觸及即進場)
 # ==========================================
 def backtest_strategy(df_history, ma_series):
     total_return = 0.0
@@ -64,7 +65,6 @@ def backtest_strategy(df_history, ma_series):
     buy_day_index = -1
     trade_logs = []
 
-    # 精算交易稅費：買進手續費 0.1425%, 賣出手續費 0.1425% + 證交稅 0.3%
     fee_buy = 0.001425
     fee_sell = 0.001425 + 0.003
 
@@ -84,28 +84,16 @@ def backtest_strategy(df_history, ma_series):
         ma = ma_subset.iloc[i]
         trigger_buy = ma * 1.015
 
-        # ======================
-        # 買進判定
-        # ======================
         if not in_position:
-            # 修改點：只要當天最高價突破觸發點，且最低價有涵蓋到（代表盤中確實有觸及或越過這個價格）
             if high >= trigger_buy and low <= trigger_buy:
                 buy_price_raw = trigger_buy
                 buy_date = date
                 in_position = True
                 buy_day_index = i
-                # 【重要修正】徹底移除原本的收盤價跌破 MA 過濾鎖，只要觸及就判定成功進場！
-                
-        # ======================
-        # 賣出判定
-        # ======================
         else:
             exit_p = None
-
-            # 隔日開盤停損 (進場隔天，如果進場日的收盤跌破均線，開盤立刻砍)
             if i == buy_day_index + 1 and subset['Close'].iloc[i - 1] < ma_subset.iloc[i - 1]:
                 exit_p = open_p
-            # 日後收盤跌破 MA
             elif close < ma:
                 exit_p = close
 
@@ -153,68 +141,44 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀 (盤中觸及即買進版)...")
+    print("啟動台股電子股全自動安全掃描儀 (安全逐檔序列下載版)...")
 
     ticker_info = get_tw_electronics_list()
-    tickers = [x[0] for x in ticker_info]
-    industry_map = {x[0]: x[1] for x in ticker_info}
-    market_map = {x[0]: x[3] for x in ticker_info}
-
-    print(f"總計獲取 {len(tickers)} 檔上市/上櫃電子股標的。")
-    print("下載成交量資料進行初步篩選...")
     
-    vol_data = yf.download(
-        tickers,
-        period="10d",
-        group_by='ticker',
-        auto_adjust=True,
-        progress=False,
-        threads=True
-    )
-
-    valid_tickers = []
-    for t in tickers:
-        try:
-            if t not in vol_data:
-                continue
-            avg_vol = vol_data[t]['Volume'].tail(5).mean()
-            if avg_vol > 3000000:
-                valid_tickers.append(t)
-        except:
-            continue
-
-    print(f"符合量能條件標的數量: {len(valid_tickers)} 檔。")
-    print("下載歷史K線資料並分析均線策略...")
-
-    full_data = yf.download(
-        valid_tickers,
-        period="3y",
-        auto_adjust=True,
-        group_by='ticker',
-        progress=False,
-        threads=True
-    )
-
+    # 建立查找字典
+    industry_map = {x[0]: x[1] for x in ticker_info}
+    symbol_map = {x[0]: x[2] for x in ticker_info}
+    market_map = {x[0]: x[3] for x in ticker_info}
+    
     rows_data = []
+    success_count = 0
 
-    for t in valid_tickers:
+    print(f"總計獲取 {len(ticker_info)} 檔上市/上櫃電子股標的，開始逐檔安全分析...")
+
+    # 改為單檔安全迴圈，徹底防範 yfinance 批次結構錯位地雷
+    for item in ticker_info:
+        t = item[0]
         try:
-            s_data = full_data[t].dropna()
-            if len(s_data) < 200:
+            # 1. 下載單檔股票歷史資料
+            s_data = yf.download(t, period="3y", auto_adjust=True, progress=False, timeout=10)
+            if s_data.empty or len(s_data) < 200:
                 continue
 
+            # 2. 檢查 5 日流動性門檻 (成交量 > 3000張)
+            avg_vol = s_data['Volume'].tail(5).mean()
+            if avg_vol < 3000000:
+                continue
+
+            # 3. 策略與均線計算
             best_ma, ret, win, count, logs = find_best_ma(s_data)
-            curr_p = s_data['Close'].iloc[-1]
-            ma_val = s_data['Close'].rolling(best_ma).mean().iloc[-1]
+            curr_p = float(s_data['Close'].iloc[-1])
+            ma_val = float(s_data['Close'].rolling(best_ma).mean().iloc[-1])
             diff = (curr_p / ma_val) - 1
 
-            # 嚴格篩選：股價距離最佳 MA 均線正負 1% 內
+            # 4. 嚴格過濾：偏離度正負 1% 內
             if abs(diff) <= 0.01:
-                pure_symbol = t.split('.')[0]
-
                 rows_data.append({
-                    'ticker': t,
-                    'symbol': pure_symbol,
+                    'symbol': symbol_map[t],
                     'industry': industry_map[t],
                     'market': market_map[t],
                     'best_ma': best_ma,
@@ -226,9 +190,16 @@ def main():
                     'count': count,
                     'logs': logs
                 })
+                success_count += 1
+                
+            # 微調間隔，避免頻繁請求被 Yahoo 阻擋
+            time.sleep(0.1)
+
         except Exception as e:
-            print(f"{t} 發生錯誤:", e)
+            print(f"跳過錯誤股票 {t}: {e}")
             continue
+
+    print(f"分析完成！共有 {success_count} 檔股票符合最新 ±1% 均線條件。")
 
     # 依據「3Y策略淨利」由大到小排序
     rows_data.sort(key=lambda x: x['ret'], reverse=True)
@@ -350,7 +321,7 @@ def main():
 <div class="container main-container">
     <div class="text-center mb-4">
         <h2 class="fw-bold text-dark">🇹🇼 台股上市/上櫃電子股均線狙擊監控台</h2>
-        <p class="text-muted">更新時間：@UPDATE_TIME@ (嚴格篩選：股價落於最佳 MA <b>±1%</b> 內 | 盤中觸及即進場)</p>
+        <p class="text-muted">更新時間：@UPDATE_TIME@ (嚴格篩選：股價落於最佳 MA <b>±1%</b> 內 | 獨立安全數據源)</p>
     </div>
     
     @CONTAINER_CONTENT@
@@ -363,7 +334,7 @@ def main():
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(final_html)
 
-    print(f"完成！已輸出全新規則的 index.html")
+    print(f"完成！已輸出高安全係數的獨立下載 index.html")
 
 
 if __name__ == "__main__":
