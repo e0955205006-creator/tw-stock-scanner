@@ -141,7 +141,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀 (安全逐檔序列下載版)...")
+    print("啟動台股電子股全自動安全掃描儀 (高強度抗崩潰防護版)...")
 
     ticker_info = get_tw_electronics_list()
     
@@ -159,18 +159,31 @@ def main():
         try:
             # 1. 下載單檔股票歷史資料
             s_data = yf.download(t, period="3y", auto_adjust=True, progress=False, timeout=10)
-            if s_data.empty or len(s_data) < 200:
+            
+            # 🛡️ 鋼鐵防護盾：如果 Yahoo 回傳空資料，或格式不對，直接安全跳過，絕對不崩潰
+            if s_data is None or s_data.empty or len(s_data) < 40:
+                continue
+            if 'Volume' not in s_data.columns or 'Close' not in s_data.columns:
                 continue
 
-            # 2. 核心修正：將 5 日流動性門檻放寬至 2000張 (2,000,000股)，防止 Yahoo 數據漏報干擾
+            # 2. 檢查 5 日流動性門檻 (放寬至 2000張 = 2,000,000股)
             avg_vol = s_data['Volume'].tail(5).mean()
-            if avg_vol < 2000000:
+            if pd.isna(avg_vol) or avg_vol < 2000000:
                 continue
 
             # 3. 策略與均線計算
             best_ma, ret, win, count, logs = find_best_ma(s_data)
+            
+            # 確保最後一筆資料有效
+            if len(s_data['Close']) < best_ma:
+                continue
+                
             curr_p = float(s_data['Close'].iloc[-1])
             ma_val = float(s_data['Close'].rolling(best_ma).mean().iloc[-1])
+            
+            if pd.isna(curr_p) or pd.isna(ma_val) or ma_val == 0:
+                continue
+                
             diff = (curr_p / ma_val) - 1
 
             # 4. 嚴格過濾：偏離度正負 1% 內
@@ -189,14 +202,16 @@ def main():
                     'logs': logs
                 })
                 success_count += 1
+                print(f"🎯 發現符合標的：{symbol_map[t]} (偏離度: {diff*100:+.2f}%)")
                 
-            time.sleep(0.1)
+            # 🕰️ 稍微拉長延遲，溫柔對待 Yahoo 伺服器防封鎖
+            time.sleep(0.2)
 
         except Exception as e:
-            print(f"跳過錯誤股票 {t}: {e}")
+            print(f"⚠️ 獨立跳過錯誤股票 {t}: {e}")
             continue
 
-    print(f"分析完成！共有 {success_count} 檔股票符合最新 ±1% 均線條件。")
+    print(f"掃描結束！共有 {success_count} 檔股票符合最新 ±1% 均線條件。")
 
     # 依據「3Y策略淨利」由大到小排序
     rows_data.sort(key=lambda x: x['ret'], reverse=True)
@@ -331,7 +346,7 @@ def main():
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(final_html)
 
-    print(f"完成！已輸出全新放寬成交量門檻的 index.html")
+    print(f"完成！已輸出抗封鎖、高防禦力的 index.html")
 
 
 if __name__ == "__main__":
