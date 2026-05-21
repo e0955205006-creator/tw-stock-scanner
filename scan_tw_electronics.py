@@ -132,7 +132,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀 (新增勝率功能欄位版)...")
+    print("啟動台股電子股全自動安全掃描儀 (抗深夜斷流健全修復版)...")
 
     ticker_info = get_tw_electronics_list()
     
@@ -163,9 +163,14 @@ def main():
             s_data['Volume'] = pd.to_numeric(s_data['Volume'], errors='coerce')
             s_data['Close'] = pd.to_numeric(s_data['Close'], errors='coerce')
 
-            # 5日成交量門檻
+            # 🛠️ 核心健全修復：移除尾部因交易所沉澱產生的空值列，防止均量計算被歸零
+            s_data = s_data.dropna(subset=['Close', 'Volume'])
+            if len(s_data) < 40:
+                continue
+
+            # 5日成交量門檻 (1000張 = 1,000,000股)
             avg_vol = s_data['Volume'].tail(5).mean()
-            if pd.isna(avg_vol) or avg_vol < 1000000:
+            if pd.isna(avg_vol) || avg_vol < 1000000:
                 continue
 
             best_ma, ret, win, count, logs = find_best_ma(s_data)
@@ -217,8 +222,6 @@ def main():
         ret_color = "#f63538" if r['ret'] > 0 else "#1aa308"
         diff_color = "#ff6b6b" if abs(r['diff_pct']) > 2 else "#2b8a3e"
         market_badge = "bg-dark" if r['market'] == "上市" else "bg-info text-dark"
-        
-        # 決定勝率顏色 (大於 50% 用深色/紅色調，小於等於 50% 灰色調)
         win_color = "#d94141" if r['win'] >= 50 else "#6c757d"
         
         detail_rows = ""
@@ -345,7 +348,7 @@ def main():
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(final_html)
 
-    print(f"完成！已輸出含勝率功能之 index.html")
+    print(f"完成！已輸出抗深夜斷流與勝率功能之 index.html")
 
 
 if __name__ == "__main__":
