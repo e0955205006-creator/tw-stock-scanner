@@ -132,7 +132,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀 (抗深夜斷流健全修復版)...")
+    print("啟動台股電子股全自動安全掃描儀 (抗深夜斷流語法修正版)...")
 
     ticker_info = get_tw_electronics_list()
     
@@ -163,14 +163,14 @@ def main():
             s_data['Volume'] = pd.to_numeric(s_data['Volume'], errors='coerce')
             s_data['Close'] = pd.to_numeric(s_data['Close'], errors='coerce')
 
-            # 🛠️ 核心健全修復：移除尾部因交易所沉澱產生的空值列，防止均量計算被歸零
+            # 🛠️ 核心健全修復：移除尾部因交易所沉澱產生的空值列
             s_data = s_data.dropna(subset=['Close', 'Volume'])
             if len(s_data) < 40:
                 continue
 
-            # 5日成交量門檻 (1000張 = 1,000,000股)
+            # 5日成交量門檻 (1000張 = 1,000,000股) -> 已修正為正確 Python or 語法
             avg_vol = s_data['Volume'].tail(5).mean()
-            if pd.isna(avg_vol) || avg_vol < 1000000:
+            if pd.isna(avg_vol) or avg_vol < 1000000:
                 continue
 
             best_ma, ret, win, count, logs = find_best_ma(s_data)
@@ -348,7 +348,7 @@ def main():
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(final_html)
 
-    print(f"完成！已輸出抗深夜斷流與勝率功能之 index.html")
+    print(f"完成！已輸出語法修正與勝率功能之 index.html")
 
 
 if __name__ == "__main__":
