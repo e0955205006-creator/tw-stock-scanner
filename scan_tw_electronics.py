@@ -132,7 +132,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀 (全新強效多重索引修復版)...")
+    print("啟動台股電子股全自動安全掃描儀 (新增勝率功能欄位版)...")
 
     ticker_info = get_tw_electronics_list()
     
@@ -153,18 +153,17 @@ def main():
             if s_data is None or s_data.empty or len(s_data) < 40:
                 continue
 
-            # 🛠️ 核心修復：強制將 yfinance 可能產生的多重索引欄位（Multi-Index）扁平化成單層欄位
+            # 多重索引扁平化防禦
             if isinstance(s_data.columns, pd.MultiIndex):
                 s_data.columns = s_data.columns.get_level_values(0)
 
             if 'Volume' not in s_data.columns or 'Close' not in s_data.columns:
                 continue
 
-            # 轉化為一般浮點數序列，完全避免格式衝突
             s_data['Volume'] = pd.to_numeric(s_data['Volume'], errors='coerce')
             s_data['Close'] = pd.to_numeric(s_data['Close'], errors='coerce')
 
-            # 檢查 5 日流動性門檻 (放寬至 1000張 = 1,000,000股)
+            # 5日成交量門檻
             avg_vol = s_data['Volume'].tail(5).mean()
             if pd.isna(avg_vol) or avg_vol < 1000000:
                 continue
@@ -182,7 +181,7 @@ def main():
                 
             diff = (curr_p / ma_val) - 1
 
-            # 篩選條件：偏離度正負 1.5% 內
+            # 篩選條件
             if abs(diff) <= 0.015:
                 rows_data.append({
                     'symbol': symbol_map[t],
@@ -219,6 +218,9 @@ def main():
         diff_color = "#ff6b6b" if abs(r['diff_pct']) > 2 else "#2b8a3e"
         market_badge = "bg-dark" if r['market'] == "上市" else "bg-info text-dark"
         
+        # 決定勝率顏色 (大於 50% 用深色/紅色調，小於等於 50% 灰色調)
+        win_color = "#d94141" if r['win'] >= 50 else "#6c757d"
+        
         detail_rows = ""
         for l in r['logs']:
             log_win_class = "table-success" if l['is_win'] else ""
@@ -243,6 +245,7 @@ def main():
             <td class="text-end fw-bold">{r['curr_p']:.2f}</td>
             <td class="text-center fw-bold text-primary">{r['best_ma']} MA</td>
             <td class="text-end fw-bold" style="color: {diff_color};">{r['diff_pct']:+.2f}%</td>
+            <td class="text-end fw-bold" style="color: {win_color};">{r['win']:.1f}%</td>
             <td class="text-end fw-bold" style="color: {ret_color}; font-size: 1.1rem;">{r['ret']:+.1f}%</td>
             <td class="text-center">
                 <button class="btn btn-xs btn-outline-primary py-0 px-2" style="font-size:0.75rem;" type="button" data-bs-toggle="collapse" data-bs-target="#detail_{r['symbol']}">
@@ -251,9 +254,9 @@ def main():
             </td>
         </tr>
         <tr class="collapse" id="detail_{r['symbol']}">
-            <td colspan="9" class="bg-light p-3">
+            <td colspan="10" class="bg-light p-3">
                 <div class="card p-2 shadow-sm border-0">
-                    <h6 class="fw-bold text-secondary mb-2">📊 {r['symbol']} 過去 3 年進出歷史對帳單 (已扣除手續費與證交稅)</h6>
+                    <h6 class="fw-bold text-secondary mb-2">📊 {r['symbol']} 過去 3 年進出歷史對帳單 (勝率: {r['win']:.1f}% | 共 {r['count']} 次交易)</h6>
                     <div class="table-responsive" style="max-height: 250px;">
                         <table class="table table-sm table-striped text-center small mb-0">
                             <thead class="table-dark">
@@ -295,6 +298,7 @@ def main():
                             <th style="width: 90px;">目前現價</th>
                             <th style="width: 90px;">最佳均線</th>
                             <th style="width: 100px;">現價偏離度</th>
+                            <th style="width: 90px;">歷史勝率</th>
                             <th style="width: 110px;">3Y策略淨利</th>
                             <th style="width: 110px;">進出明細</th>
                         </tr>
@@ -317,7 +321,7 @@ def main():
 <title>台股上市櫃電子股均線精選清單</title>
 <style>
     body { background-color: #f8f9fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-    .main-container { max-width: 1000px; margin-top: 50px; margin-bottom: 50px; }
+    .main-container { max-width: 1100px; margin-top: 50px; margin-bottom: 50px; }
     .table-card { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); padding: 25px; border: none; }
     .table th { background-color: #f1f3f5; color: #495057; font-weight: 600; text-align: center; font-size: 0.9rem; }
     .table td { vertical-align: middle; font-size: 0.95rem; }
@@ -341,7 +345,7 @@ def main():
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(final_html)
 
-    print(f"完成！已輸出抗雜訊寬容版 index.html")
+    print(f"完成！已輸出含勝率功能之 index.html")
 
 
 if __name__ == "__main__":
