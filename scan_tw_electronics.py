@@ -63,7 +63,9 @@ def backtest_strategy(df_history, ma_series):
     if start_idx is None:
         return -999, 0, 0, []
 
-    subset = df_history.loc[start_idx:]
+    # 回測時排除收盤價為空值的日子
+    clean_history = df_history.dropna(subset=['Close'])
+    subset = clean_history.loc[start_idx:]
     ma_subset = ma_series.loc[start_idx:]
 
     for i in range(len(subset)):
@@ -119,7 +121,9 @@ def find_best_ma(s_data):
     best_ret = -999999
     best_res = (20, 0, 0, 0, [])
     for ma_len in range(15, 36):
-        ma_series = s_data['Close'].rolling(ma_len).mean()
+        # 計算 MA 時先剃除 Close 的空值
+        clean_close = s_data['Close'].dropna()
+        ma_series = clean_close.rolling(ma_len).mean()
         ret, win, count, logs = backtest_strategy(s_data, ma_series)
         if ret > best_ret:
             best_ret = ret
@@ -132,7 +136,7 @@ def find_best_ma(s_data):
 # ==========================================
 def main():
     today_dt = datetime.datetime.now() + datetime.timedelta(hours=8)
-    print("啟動台股電子股全自動安全掃描儀 (抗深夜斷流語法修正版)...")
+    print("啟動台股電子股全自動安全掃描儀 (最新收盤價精準修正版)...")
 
     ticker_info = get_tw_electronics_list()
     
@@ -150,7 +154,7 @@ def main():
         try:
             s_data = yf.download(t, period="3y", auto_adjust=False, progress=False, timeout=10)
             
-            if s_data is None or s_data.empty or len(s_data) < 40:
+            if s_data is None or s_data.empty:
                 continue
 
             # 多重索引扁平化防禦
@@ -163,30 +167,33 @@ def main():
             s_data['Volume'] = pd.to_numeric(s_data['Volume'], errors='coerce')
             s_data['Close'] = pd.to_numeric(s_data['Close'], errors='coerce')
 
-            # 🛠️ 核心健全修復：移除尾部因交易所沉澱產生的空值列
-            s_data = s_data.dropna(subset=['Close', 'Volume'])
-            if len(s_data) < 40:
+            # 🛠️ 修正點 1：分開處理，現價只認收盤價（確保拿到今天最新價）
+            price_data = s_data.dropna(subset=['Close'])
+            if len(price_data) < 40:
                 continue
 
-            # 5日成交量門檻 (1000張 = 1,000,000股) -> 已修正為正確 Python or 語法
-            avg_vol = s_data['Volume'].tail(5).mean()
+            # 🛠️ 修正點 2：成交量獨立過濾空值，再算5日均量（防止深夜斷流誤刪最新價格列）
+            vol_data = s_data.dropna(subset=['Volume'])
+            if vol_data.empty:
+                continue
+            avg_vol = vol_data['Volume'].tail(5).mean()
             if pd.isna(avg_vol) or avg_vol < 1000000:
                 continue
 
-            best_ma, ret, win, count, logs = find_best_ma(s_data)
+            best_ma, ret, win, count, logs = find_best_ma(price_data)
             
-            if len(s_data['Close']) < best_ma:
+            if len(price_data['Close']) < best_ma:
                 continue
                 
-            curr_p = float(s_data['Close'].iloc[-1])
-            ma_val = float(s_data['Close'].rolling(best_ma).mean().iloc[-1])
+            curr_p = float(price_data['Close'].iloc[-1])
+            ma_val = float(price_data['Close'].rolling(best_ma).mean().iloc[-1])
             
             if pd.isna(curr_p) or pd.isna(ma_val) or ma_val == 0:
                 continue
                 
             diff = (curr_p / ma_val) - 1
 
-            # 篩選條件
+            # 篩選條件：落於指定 MA 均線的正負 1.5% 寬容區之內
             if abs(diff) <= 0.015:
                 rows_data.append({
                     'symbol': symbol_map[t],
@@ -202,7 +209,7 @@ def main():
                     'logs': logs
                 })
                 success_count += 1
-                print(f"🎯 成功捕獲標的：{symbol_map[t]} (偏離度: {diff*100:+.2f}%)")
+                print(f"🎯 成功捕獲標的：{symbol_map[t]} (最新收盤價: {curr_p}, 偏離度: {diff*100:+.2f}%)")
                 
             time.sleep(0.1)
 
@@ -348,7 +355,7 @@ def main():
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(final_html)
 
-    print(f"完成！已輸出語法修正與勝率功能之 index.html")
+    print(f"完成！已輸出最新收盤價修正版 index.html")
 
 
 if __name__ == "__main__":
