@@ -1,37 +1,38 @@
-name: Daily TW Stock Scan
+name: Auto Stock Scan
 
 on:
-  schedule:
-    - cron: '30 9 * * 1-5'
+  # 1. 允許您隨時手動點擊按鈕更新（保留原本功能）
   workflow_dispatch:
 
+  # 2. 自動排程：設定在週一至週五的每天下午 4:30 執行（避開整點尖峰）
+  schedule:
+    - cron: '30 8 * * 1-5'
+
 jobs:
-  build:
+  run_strategy:
     runs-on: ubuntu-latest
-    # 重點：在這裡明確加入寫入權限
-    permissions:
-      contents: write
-      
     steps:
-      - name: Checkout code
+      - name: 檢查程式碼
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: 設定 Python 環境
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.10'
 
-      - name: Install dependencies
+      - name: 安裝必要套件
         run: |
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install yfinance pandas requests lxml openpyxl
 
-      - name: Run Scan
+      - name: 執行台股電子股掃描
         run: python scan_tw_electronics.py
 
-      - name: Commit and Push
+      - name: 自動提交網頁更新並強制喚醒排程
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
           git add index.html
-          # 如果沒有檔案變動就不 commit，避免報錯
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto update scan results" && git push)
+          # 關鍵：每次執行都留下一條有時間戳記的 commit，向 GitHub 證明這個庫非常活躍，永久防止排程休眠！
+          git commit -m "自動更新報表: $(date +'%Y-%m-%d %H:%M:%S') [Keep Alive]" || exit 0
+          git push
